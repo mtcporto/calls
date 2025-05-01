@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebRTC Meet - Home</title>
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #f8f9fa;
+    }
+    .container {
+      max-width: 400px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container text-center">
+    <h1>WebRTC Meet</h1>
+    <form id="name-form">
+      <div class="form-group">
+        <label for="user-name">Qual o seu nome?</label>
+        <input type="text" id="user-name" class="form-control" required>
+      </div>
+      <button type="submit" class="btn btn-primary mt-3">Entrar</button>
+    </form>
+  </div>
+  <script>
+    document.getElementById('name-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      const userName = document.getElementById('user-name').value;
+      localStorage.setItem('userName', userName);
+      window.location.href = 'sala.html';
+    });
+  </script>
+</body>
+</html>
