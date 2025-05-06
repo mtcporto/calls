@@ -50,6 +50,10 @@ let username;
 let isPolling = false;
 let lastPollTime = 0;
 
+// Variável para armazenar status de áudio e vídeo
+let audioStatus = true;
+let videoStatus = true;
+
 // Log personalizado
 function log(message) {
   console.log(`[WebRTC ${new Date().toLocaleTimeString()}] ${message}`);
@@ -298,7 +302,47 @@ function createPeerConnection(peerId, peerName, initiator, addRemoteVideo) {
     }
   };
   
-  // Resto do código existente...
+  // Adicionar canal de dados para comunicação não-mídia
+  if (initiator) {
+    const dataChannel = pc.createDataChannel('status');
+    dataChannel.onopen = () => {
+      console.log(`Canal de dados aberto para ${peerId}`);
+      // Enviar status atual imediatamente após conexão
+      dataChannel.send(JSON.stringify({
+        type: 'media-status',
+        audio: audioStatus,
+        video: videoStatus
+      }));
+    };
+    pc.dataChannel = dataChannel;
+  } else {
+    pc.ondatachannel = (event) => {
+      const dataChannel = event.channel;
+      pc.dataChannel = dataChannel;
+      
+      dataChannel.onopen = () => {
+        console.log(`Canal de dados aberto para ${peerId}`);
+        // Enviar status atual imediatamente após conexão
+        dataChannel.send(JSON.stringify({
+          type: 'media-status',
+          audio: audioStatus,
+          video: videoStatus
+        }));
+      };
+      
+      dataChannel.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'media-status') {
+            // Atualizar UI com status remoto
+            updateRemoteMediaUI(peerId, data.audio, data.video);
+          }
+        } catch (e) {
+          console.error('Erro ao processar mensagem de dados:', e);
+        }
+      };
+    };
+  }
   
   // Lidar com estado da negociação
   pc.onnegotiationneeded = () => {
@@ -426,4 +470,40 @@ export function getDebugInfo() {
   }
   
   return debugInfo;
+}
+
+// Função para enviar estado de mídia para outros participantes
+export function updateMediaStatus(audioEnabled, videoEnabled) {
+  audioStatus = audioEnabled;
+  videoStatus = videoEnabled;
+  
+  // Enviar status para todos os peers conectados
+  for (const peerId in peerConnections) {
+    if (peerConnections[peerId].dataChannel && 
+        peerConnections[peerId].dataChannel.readyState === 'open') {
+      peerConnections[peerId].dataChannel.send(JSON.stringify({
+        type: 'media-status',
+        audio: audioEnabled,
+        video: videoEnabled
+      }));
+    }
+  }
+}
+
+// Função para atualizar UI baseada no status remoto
+export function updateRemoteMediaUI(userId, audioEnabled, videoEnabled) {
+  // Atualizar ícone de microfone
+  const micStatus = document.querySelector(`#container-${userId} .mic-status`);
+  if (micStatus) {
+    micStatus.innerHTML = audioEnabled ? 
+      '<i class="fas fa-microphone"></i>' : 
+      '<i class="fas fa-microphone-slash"></i>';
+    micStatus.classList.toggle('disabled', !audioEnabled);
+  }
+  
+  // Marcar container de vídeo como desligado se necessário
+  const container = document.getElementById(`container-${userId}`);
+  if (container) {
+    container.classList.toggle('video-off', !videoEnabled);
+  }
 }

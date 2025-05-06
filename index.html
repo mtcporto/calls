@@ -1,30 +1,52 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WebRTC Meet - Home</title>
-  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebRTC Meet</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.15.4/css/all.css">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="login-page">
-  <div class="container text-center">
-    <h1>WebRTC Meet</h1>
-    <form id="name-form">
-      <div class="form-group">
-        <label for="user-name">Qual o seu nome?</label>
-        <input type="text" id="user-name" class="form-control" required>
+  <div class="login-container">
+    <div class="tab-content" id="tab-content">
+      <!-- Aba de entrada em sala existente -->
+      <div class="tab-pane active" id="join-tab">
+        <h1>Entrar em Reunião</h1>
+        <form id="join-form">
+          <div class="form-group mb-3">
+            <label for="join-name" class="form-label">Seu nome</label>
+            <input type="text" id="join-name" class="form-control" placeholder="Digite seu nome" required>
+          </div>
+          <div class="form-group mb-3">
+            <label for="room-code" class="form-label">Código da sala</label>
+            <input type="text" id="room-code" class="form-control" placeholder="xxx-xxxx-xxx" required>
+          </div>
+          <button type="submit" class="btn btn-primary mt-3">Entrar na Reunião</button>
+          <div class="text-center mt-3">
+            <a href="#" id="switch-to-create" class="text-decoration-none">Criar nova sala</a>
+          </div>
+        </form>
       </div>
-      <button type="submit" class="btn btn-primary mt-3">Entrar</button>
-    </form>
+      
+      <!-- Aba de criação de nova sala -->
+      <div class="tab-pane" id="create-tab">
+        <h1>Criar Reunião</h1>
+        <form id="create-form">
+          <div class="form-group mb-3">
+            <label for="create-name" class="form-label">Seu nome</label>
+            <input type="text" id="create-name" class="form-control" placeholder="Digite seu nome" required>
+          </div>
+          <button type="submit" class="btn btn-primary mt-3">Iniciar Reunião</button>
+          <div class="text-center mt-3">
+            <a href="#" id="switch-to-join" class="text-decoration-none">Entrar em sala existente</a>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
-  <script>
-    document.getElementById('name-form').addEventListener('submit', (event) => {
-      event.preventDefault();
-      const userName = document.getElementById('user-name').value;
-      localStorage.setItem('userName', userName);
-      window.location.href = 'sala.html';
-    });
-  </script>
+  
+  <script src="index.js"></script>
 </body>
 </html>
