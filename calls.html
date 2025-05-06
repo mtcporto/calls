@@ -6,299 +6,267 @@
     <title>WebRTC Meet</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.15.4/css/all.css">
+    <link rel="stylesheet" href="styles.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/webrtc-adapter/8.1.2/adapter.min.js" integrity="sha512-l40eBFtXx+ve5RryIELC3y6/OM6Nu89mLGQd7fg1C93tN6XrkC3supb+/YiD/Y+B8P37kdJjtG1MT1kOO2VzxA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <style>
-        html {
-            color-scheme: light dark;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-            background: white;
-            color: black;
-        }
-        body, h1, h2 {
-            margin: 0;
-        }
-        h1 {
-            font-size: 1.5rem;
-            grid-column: 1 / -1; /* Garante que o título ocupe toda a largura do grid */
-        }
-        video {
-            width: 800px;
-            margin: 0 auto;
-            display: block;
-            transform: scaleX(-1); /* Flip horizontal */
-        }
-        .grid {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); 
-            gap: 1rem;
-            align-items: start; 
-        }
-        .video-container {
-            display: flex; 
-            flex-direction: column;
-            align-items: center;
-            width: 100%; 
-            margin: 0 auto; 
-        }
-        .controls-and-info {
-            display: flex;
-            flex-direction: row; 
-            align-items: center;
-            gap: 10px;
-            width: 100%; 
-        }
-        #local-video, 
-        .remote-video {
-            width: 100%; 
-            margin: 0; 
-        }
-        .controls {
-            margin-top: 10px;
-            display: flex;
-            justify-content: center; 
-            align-items: center;
-        }
-        #room-info,
-        .device-settings {
-            text-align: left;
-            margin-top: 10px;  
-            width: 50%;                                           
-        }
-        .device-settings {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            margin-top: 10px;
-            flex-direction: row;
-            justify-content: flex-end
-        }
-        .btn-group {
-            display: flex;
-            align-items: center; 
-        }
-        .btn-group > .dropdown-toggle {
-            border-top-right-radius: 0;
-            border-bottom-right-radius: 0;
-        }
-        .btn-group > .dropdown-toggle-split {
-            height: 38px; 
-            padding: 0.375rem 0.75rem; 
-            border-top-left-radius: 0;
-            border-bottom-left-radius: 0;
-        }
-        .control-button .fas {
-            color: inherit; 
-        }
-        .control-button {
-            margin: 5px;
-            padding: 10px;
-            font-size: 16px;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        .control-button.btn-danger {
-            color: white;
-            background-color: #dc3545;
-        }
-        @media (max-width: 500px) {
-            .grid {
-                grid-template-columns: minmax(0, 1fr);
-            }
-            video {
-                width: 100%;
-            }
-        }
-        .config-section {
-            text-align: left;
-        }
-        .config-label {
-            display: flex;
-            align-items: center;
-            margin-bottom: 5px;
-        }
-        .config-label i {
-            margin-right: 5px;
-        }
-    </style>
 </head>
 <body>
-<div class="container text-center mt-5">
+<div class="container mt-3">
     <h1 id="room-name">WebRTC Meet</h1>
     <div class="grid" id="videos-grid">
-        <div class="video-container">
-            <video id="local-video" autoplay muted></video>
+        <div class="video-container local focus">
+            <video id="local-video" autoplay muted playsinline></video>
+            <div class="user-name" id="local-user-name">Você</div>
             <div class="controls-and-info">
-                <div id="room-info"></div>
-                <div class="controls mt-3">
-                    <button id="toggle-audio" class="btn btn-secondary control-button"><i class="fas fa-microphone"></i></button>
-                    <button id="toggle-video" class="btn btn-secondary control-button"><i class="fas fa-video"></i></button>
-                    <button id="leave-room" class="btn btn-danger control-button"><i class="fas fa-phone"></i></button>
+                <div class="controls">
+                    <button id="toggle-audio" class="control-button"><i class="fas fa-microphone"></i></button>
+                    <button id="toggle-video" class="control-button"><i class="fas fa-video"></i></button>
+                    <button id="leave-button" class="control-button btn-danger"><i class="fas fa-phone-slash"></i></button>
+                    <button id="debug-button" class="control-button"><i class="fas fa-bug"></i></button>
                 </div>
             </div>
             <div class="device-settings">
-                <div class="btn-group">
-                    <button class="btn btn-secondary btn-sm control-button" type="button"><i class="fas fa-microphone"></i></button>
-                    <button type="button" class="btn btn-sm btn-secondary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false">
-                        <span class="visually-hidden">Toggle Microphone</span>
-                    </button>
-                    <ul class="dropdown-menu" id="audio-input-select"></ul>
-                </div>
-                <div class="btn-group">
-                    <button class="btn btn-secondary btn-sm control-button" type="button"><i class="fas fa-volume-up"></i></button>
-                    <button type="button" class="btn btn-sm btn-secondary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false">
-                        <span class="visually-hidden">Toggle Headphone</span>
-                    </button>
-                    <ul class="dropdown-menu" id="audio-output-select"></ul>
-                </div>
-                <div class="btn-group">
-                    <button class="btn btn-secondary btn-sm control-button" type="button"><i class="fas fa-video"></i></button>
-                    <button type="button" class="btn btn-sm btn-secondary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false">
-                        <span class="visually-hidden">Toggle Video</span>
-                    </button>
-                    <ul class="dropdown-menu" id="video-input-select"></ul>
-                </div>
+                <select id="camera-select" class="form-select">
+                    <option value="">Selecionar câmera...</option>
+                </select>
+                <select id="microphone-select" class="form-select">
+                    <option value="">Selecionar microfone...</option>
+                </select>
             </div>
         </div>
     </div>
 </div>
-<script type="module">
-    import { connectToRoom, addStreamToVideoElement } from './webrtc.js';
 
+<script type="module">
+    import { connectToRoom, addStreamToVideoElement, disconnect, getDebugInfo } from './webrtc.js?v=3';
+
+    // Elementos DOM
+    const localVideo = document.getElementById('local-video');
     const toggleAudioButton = document.getElementById('toggle-audio');
     const toggleVideoButton = document.getElementById('toggle-video');
-    const leaveRoomButton = document.getElementById('leave-room');
-    const audioInputSelect = document.getElementById('audio-input-select');
-    const audioOutputSelect = document.getElementById('audio-output-select');
-    const videoInputSelect = document.getElementById('video-input-select');
-    const roomInfoElement = document.getElementById('room-info');
+    const leaveButton = document.getElementById('leave-button');
+    const cameraSelect = document.getElementById('camera-select');
+    const microphoneSelect = document.getElementById('microphone-select');
+    const localUserName = document.getElementById('local-user-name');
+    const videosGrid = document.getElementById('videos-grid');
+
+    // Obter nome da sala a partir da URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const room = urlParams.get('room');
+    
+    // Variáveis
+    let localStream;
     let audioEnabled = true;
     let videoEnabled = true;
-    let localStream;
+    const userName = localStorage.getItem('userName') || 'Anônimo';
 
-    function updateRoomInfo() {
-        const currentTime = new Date().toLocaleTimeString();
-        const roomName = window.location.search.split('=')[1] || 'unknown';
-        roomInfoElement.textContent = `${currentTime} | ${roomName}`;
-    }
+    // Atualizar título com nome da sala
+    document.getElementById('room-name').textContent = `Sala: ${room || 'Desconhecida'}`;
+    localUserName.textContent = `${userName} (Você)`;
 
-    async function initializeLocalStream() {
+    // Inicializar mídia e conectar à sala
+    async function init() {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            const localVideoElement = document.getElementById('local-video');
-            localVideoElement.srcObject = stream;
-            return stream;
+            // Obter lista de dispositivos
+            await updateDeviceList();
+            
+            // Iniciar stream local com o dispositivo selecionado ou padrão
+            await startLocalStream();
+            
+            // Conectar à sala
+            if (room) {
+                const connected = await connectToRoom(room, localStream, addRemoteVideo);
+                if (!connected) {
+                    alert('Erro ao conectar à sala. Por favor, tente novamente.');
+                }
+            } else {
+                alert('Nome da sala não especificado!');
+                window.location.href = 'sala.html';
+            }
         } catch (error) {
-            console.error('Erro ao obter o fluxo de mídia local:', error);
+            console.error('Erro ao inicializar:', error);
+            alert(`Erro ao acessar câmera/microfone: ${error.message}`);
         }
     }
 
-    async function getDeviceSettings() {
+    // Listar dispositivos disponíveis
+    async function updateDeviceList() {
         try {
             const devices = await navigator.mediaDevices.enumerateDevices();
-            const audioInputDevices = devices.filter(device => device.kind === 'audioinput');
-            const audioOutputDevices = devices.filter(device => device.kind === 'audiooutput');
-            const videoInputDevices = devices.filter(device => device.kind === 'videoinput');
-
-            audioInputDevices.forEach(device => {
-                const option = document.createElement('li');
-                const link = document.createElement('a');
-                link.href = '#';
-                link.className = 'dropdown-item';
-                link.textContent = device.label || `Dispositivo de entrada de áudio ${audioInputDevices.indexOf(device)}`;
-                option.appendChild(link);
-                audioInputSelect.appendChild(option);
+            
+            // Limpar listas
+            cameraSelect.innerHTML = '<option value="">Selecionar câmera...</option>';
+            microphoneSelect.innerHTML = '<option value="">Selecionar microfone...</option>';
+            
+            // Adicionar câmeras
+            devices.filter(d => d.kind === 'videoinput').forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.text = device.label || `Câmera ${cameraSelect.length}`;
+                cameraSelect.appendChild(option);
             });
-
-            audioOutputDevices.forEach(device => {
-                const option = document.createElement('li');
-                const link = document.createElement('a');
-                link.href = '#';
-                link.className = 'dropdown-item';
-                link.textContent = device.label || `Dispositivo de saída de áudio ${audioOutputDevices.indexOf(device)}`;
-                option.appendChild(link);
-                audioOutputSelect.appendChild(option);
-            });
-
-            videoInputDevices.forEach(device => {
-                const option = document.createElement('li');
-                const link = document.createElement('a');
-                link.href = '#';
-                link.className = 'dropdown-item';
-                link.textContent = device.label || `Dispositivo de entrada de vídeo ${videoInputDevices.indexOf(device)}`;
-                option.appendChild(link);
-                videoInputSelect.appendChild(option);
+            
+            // Adicionar microfones
+            devices.filter(d => d.kind === 'audioinput').forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.text = device.label || `Microfone ${microphoneSelect.length}`;
+                microphoneSelect.appendChild(option);
             });
         } catch (error) {
-            console.error('Erro ao obter as configurações de dispositivo:', error);
+            console.error('Erro ao listar dispositivos:', error);
         }
     }
 
-    function addRemoteVideo(stream) {
-        const videoContainer = document.createElement('div');
-        videoContainer.className = 'video-container';
-        const remoteVideo = document.createElement('video');
-        remoteVideo.srcObject = stream;
-        remoteVideo.autoplay = true;
-        remoteVideo.className = 'remote-video';
-        videoContainer.appendChild(remoteVideo);
-        document.getElementById('videos-grid').appendChild(videoContainer);
+    // Iniciar stream local
+    async function startLocalStream(videoDeviceId, audioDeviceId) {
+        const constraints = {
+            audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true,
+            video: videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true
+        };
+        
+        // Se já existe um stream, pare-o
+        if (localStream) {
+            localStream.getTracks().forEach(track => track.stop());
+        }
+        
+        // Obter novo stream
+        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        addStreamToVideoElement(localStream, localVideo);
+        
+        // Atualizar permissões após obter stream para mostrar os nomes dos dispositivos
+        if (!cameraSelect.options[1]?.text?.includes('Câmera')) {
+            updateDeviceList();
+        }
+        
+        return localStream;
     }
 
-    initializeLocalStream()
-        .then(stream => {
-            localStream = stream;
-
-            toggleAudioButton.addEventListener('click', () => {
-                audioEnabled = !audioEnabled;
-                localStream.getAudioTracks().forEach(track => track.enabled = audioEnabled);
-
-                if (audioEnabled) {
-                    toggleAudioButton.classList.remove('btn-danger');
-                    toggleAudioButton.classList.add('btn-secondary');
-                } else {
-                    toggleAudioButton.classList.remove('btn-secondary');
-                    toggleAudioButton.classList.add('btn-danger');
-                }
-
-                toggleAudioButton.querySelector('i').className = audioEnabled ? 'fas fa-microphone' : 'fas fa-microphone-slash';
+    // Adicionar vídeo remoto
+    function addRemoteVideo(stream, userId, userName) {
+        const videoId = `remote-video-${userId}`;
+        
+        // Verificar se o vídeo já existe
+        let videoElement = document.getElementById(videoId);
+        
+        if (!videoElement) {
+            // Adicionar classe has-remote ao grid
+            videosGrid.classList.add('has-remote');
+            
+            // Mover o vídeo local para miniatura
+            document.querySelector('.video-container.local').classList.remove('focus');
+            
+            // Criar container
+            const videoContainer = document.createElement('div');
+            videoContainer.className = 'video-container remote focus';
+            videoContainer.id = `container-${userId}`;
+            
+            // Criar elemento de vídeo
+            videoElement = document.createElement('video');
+            videoElement.id = videoId;
+            videoElement.className = 'remote-video';
+            videoElement.autoplay = true;
+            videoElement.playsInline = true;
+            
+            // Adicionar nome do usuário
+            const nameTag = document.createElement('div');
+            nameTag.className = 'user-name';
+            nameTag.textContent = userName || `Usuário ${userId.substring(0, 5)}`;
+            videoContainer.appendChild(nameTag);
+            
+            // Adicionar vídeo ao container
+            videoContainer.appendChild(videoElement);
+            
+            // Adicionar ao grid
+            document.getElementById('videos-grid').appendChild(videoContainer);
+            
+            // Adicionar evento de clique para alternar o foco
+            videoContainer.addEventListener('click', () => {
+                // Se já está em foco, não faz nada
+                if (videoContainer.classList.contains('focus')) return;
+                
+                // Remove focus de todos
+                document.querySelectorAll('.video-container').forEach(container => {
+                    container.classList.remove('focus');
+                });
+                
+                // Adiciona focus neste
+                videoContainer.classList.add('focus');
             });
-
-            toggleVideoButton.addEventListener('click', () => {
-                videoEnabled = !videoEnabled;
-                localStream.getVideoTracks().forEach(track => track.enabled = videoEnabled);
-
-                if (videoEnabled) {
-                    toggleVideoButton.classList.remove('btn-danger');
-                    toggleVideoButton.classList.add('btn-secondary');
-                } else {
-                    toggleVideoButton.classList.remove('btn-secondary');
-                    toggleVideoButton.classList.add('btn-danger');
-                }
-
-                toggleVideoButton.querySelector('i').className = videoEnabled ? 'fas fa-video' : 'fas fa-video-slash';
+            
+            // Adicionar o mesmo evento para o vídeo local
+            document.querySelector('.video-container.local').addEventListener('click', function() {
+                if (this.classList.contains('focus')) return;
+                
+                document.querySelectorAll('.video-container').forEach(container => {
+                    container.classList.remove('focus');
+                });
+                
+                this.classList.add('focus');
             });
+        }
+        
+        // Definir stream no elemento de vídeo
+        videoElement.srcObject = stream;
+    }
 
-            leaveRoomButton.addEventListener('click', () => {
-                if (localStream) {
-                    localStream.getTracks().forEach(track => track.stop());
-                }
-                // Redirecionar para a página inicial ou fazer outras ações necessárias
-            });
+    // Eventos
+    toggleAudioButton.addEventListener('click', () => {
+        audioEnabled = !audioEnabled;
+        localStream.getAudioTracks().forEach(track => track.enabled = audioEnabled);
+        toggleAudioButton.innerHTML = audioEnabled ? 
+            '<i class="fas fa-microphone"></i>' : 
+            '<i class="fas fa-microphone-slash"></i>';
+        toggleAudioButton.className = audioEnabled ? 
+            'control-button' : 
+            'control-button btn-danger';
+    });
 
-            getDeviceSettings();
-            updateRoomInfo();
-            setInterval(updateRoomInfo, 60000);
+    toggleVideoButton.addEventListener('click', () => {
+        videoEnabled = !videoEnabled;
+        localStream.getVideoTracks().forEach(track => track.enabled = videoEnabled);
+        toggleVideoButton.innerHTML = videoEnabled ? 
+            '<i class="fas fa-video"></i>' : 
+            '<i class="fas fa-video-slash"></i>';
+        toggleVideoButton.className = videoEnabled ? 
+            'control-button' : 
+            'control-button btn-danger';
+    });
 
-            const roomName = window.location.search.split('=')[1] || 'unknown';
-            connectToRoom(roomName, localStream, addRemoteVideo);
-        })
-        .catch(error => {
-            console.error('Erro ao inicializar o fluxo de mídia local:', error);
-        });
+    leaveButton.addEventListener('click', () => {
+        disconnect();
+        window.location.href = 'sala.html';
+    });
+
+    cameraSelect.addEventListener('change', async () => {
+        if (cameraSelect.value) {
+            await startLocalStream(cameraSelect.value, microphoneSelect.value);
+        }
+    });
+
+    microphoneSelect.addEventListener('change', async () => {
+        if (microphoneSelect.value) {
+            await startLocalStream(cameraSelect.value, microphoneSelect.value);
+        }
+    });
+
+    // Botão de debug
+    document.getElementById('debug-button').addEventListener('click', () => {
+        try {
+            const debugInfo = getDebugInfo();
+            console.table(debugInfo.connections);
+            alert(`Diagnóstico: ${Object.keys(debugInfo.connections).length} conexões\n` +
+                  `Online: ${debugInfo.network}\n` +
+                  `Suporte WebRTC: ${debugInfo.webRTCSupport}\n` +
+                  `Dispositivos de mídia: ${debugInfo.mediaDevices}\n` +
+                  `Veja mais detalhes no console`);
+        } catch (error) {
+            console.error('Erro ao obter informações de debug:', error);
+            alert('Erro ao obter informações de debug. Veja o console para mais detalhes.');
+        }
+    });
+
+    // Inicializar
+    init();
 </script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

@@ -1,73 +1,429 @@
+// Configuração dos servidores STUN/TURN públicos
 const configuration = {
-    iceServers: [
-      {
-        urls: 'stun:stun.l.google.com:19302'
-      },
-      {
-        urls: 'stun:stun1.l.google.com:19302'
-      },
-      {
-        urls: 'stun:stun2.l.google.com:19302'
-      },
-      {
-        urls: 'stun:stun3.l.google.com:19302'
-      },
-      {
-        urls: 'stun:stun4.l.google.com:19302'
-      }
-    ]
-  };
-  
-  const peerConnection = new RTCPeerConnection(configuration);
-  
-  peerConnection.onicecandidate = event => {
-    if (event.candidate) {
-      // Enviar o ICE candidate para o outro peer
-      console.log('New ICE candidate:', event.candidate);
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    // Servidores TURN gratuitos adicionais
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    // Adicione esses servidores TURN gratuitos
+    {
+      urls: 'turn:relay.metered.ca:80',
+      username: 'e8d34faf7cb62de234b299da',
+      credential: 'uGP8+dMDCQIK+DRo'
+    },
+    {
+      urls: 'turn:relay.metered.ca:443',
+      username: 'e8d34faf7cb62de234b299da',
+      credential: 'uGP8+dMDCQIK+DRo'
+    },
+    {
+      urls: 'turn:relay.metered.ca:443?transport=tcp',
+      username: 'e8d34faf7cb62de234b299da',
+      credential: 'uGP8+dMDCQIK+DRo'
     }
-  };
-  
-  // Função assíncrona para iniciar a chamada
-  async function startCall() {
-    try {
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-  
-      // Enviar a descrição da oferta para o outro peer
-      console.log('Offer:', offer);
-    } catch (error) {
-      console.error('Error starting call:', error);
-    }
-  }
-  
-  // Função para configurar a descrição remota (recebida do outro peer)
-  async function receiveAnswer(answer) {
-    try {
-      const remoteDesc = new RTCSessionDescription(answer);
-      await peerConnection.setRemoteDescription(remoteDesc);
-    } catch (error) {
-      console.error('Error receiving answer:', error);
-    }
-  }
-  
-// webrtc.js
+  ]
+};
+
+// URL do servidor de sinalização (Cloudflare Worker)
+const SIGNALING_SERVER = 'https://webrtc.mosaicoworkers.workers.dev';
+
+// Variáveis globais
+let peerConnections = {}; // Armazena conexões peer
+let localStream;
+let roomId;
+let userId;
+let username;
+let isPolling = false;
+let lastPollTime = 0;
+
+// Log personalizado
+function log(message) {
+  console.log(`[WebRTC ${new Date().toLocaleTimeString()}] ${message}`);
+}
+
+// Gera um ID aleatório
+function generateRandomId() {
+  return Math.random().toString(36).substr(2, 9);
+}
 
 // Função para conectar à sala WebRTC
-export async function connectToRoom(roomName, localStream, addRemoteVideo) {
-    // Lógica para conexão à sala
+export async function connectToRoom(room, stream, addRemoteVideo) {
+  roomId = room;
+  userId = generateRandomId();
+  username = localStorage.getItem('userName') || 'Anônimo';
+  localStream = stream;
+  
+  console.log(`Conectando à sala ${roomId} como ${username} (ID: ${userId})`);
+  
+  // Registrar na sala
+  try {
+    const response = await fetch(`${SIGNALING_SERVER}/join`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ room: roomId, id: userId, name: username })
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      console.log(`Conectado ao servidor de sinalização`, data);
+      
+      // Conectar com os usuários existentes - MODIFICAÇÃO AQUI
+      // Ordene por ID para garantir que apenas um lado inicia
+      const sortedUsers = [...data.users].sort((a, b) => a.id.localeCompare(b.id));
+      
+      sortedUsers.forEach(user => {
+        if (user.id !== userId) {
+          // Apenas o peer com ID "menor" alfabeticamente inicia a conexão
+          const shouldInitiate = userId < user.id;
+          console.log(`Detectado usuário: ${user.name} (${user.id}), iniciando: ${shouldInitiate}`);
+          createPeerConnection(user.id, user.name, shouldInitiate, addRemoteVideo);
+        }
+      });
+      
+      // Começar a consultar o servidor em busca de atualizações
+      startPolling(addRemoteVideo);
+      
+      return true;
+    } else {
+      console.error('Falha ao conectar ao servidor de sinalização');
+      return false;
+    }
+  } catch (error) {
+    console.error('Erro ao conectar ao servidor de sinalização:', error);
+    return false;
+  }
 }
 
-// Função para adicionar o stream de vídeo a um elemento de vídeo
+// Função para iniciar polling melhorada
+function startPolling(addRemoteVideo) {
+  if (isPolling) return;
+  
+  console.log("Iniciando polling para atualizações");
+  isPolling = true;
+  lastPollTime = Date.now() - 30000; // Pegue os últimos 30 segundos de sinais para garantir
+  
+  async function poll() {
+    if (!isPolling) return;
+    
+    try {
+      const response = await fetch(`${SIGNALING_SERVER}/poll?room=${roomId}&id=${userId}&last=${lastPollTime}`);
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log(`Poll: ${data.users.length} usuários, ${data.signals?.length || 0} sinais`);
+        console.log("Usuários na sala:", data.users);
+        
+        // Processar novos usuários
+        data.users.forEach(user => {
+          if (user.id !== userId && !peerConnections[user.id]) {
+            console.log(`Novo usuário: ${user.name} (${user.id})`);
+            createPeerConnection(user.id, user.name, true, addRemoteVideo);
+          }
+        });
+        
+        // Processar sinais recebidos
+        if (data.signals && data.signals.length > 0) {
+          console.log("Sinais recebidos:", data.signals);
+          data.signals.forEach(signal => {
+            handleSignal(signal, addRemoteVideo);
+          });
+        }
+        
+        lastPollTime = Date.now();
+      }
+    } catch (error) {
+      console.error("Erro durante polling:", error);
+    }
+    
+    // Sempre agendar próximo poll, mesmo com erro
+    setTimeout(poll, 2000);
+  }
+  
+  // Iniciar o polling
+  poll();
+}
+
+// Processa sinais recebidos
+async function handleSignal(signal, addRemoteVideo) {
+  const { type, sender, data: signalData } = signal;
+  
+  console.log(`Processando sinal ${type} de ${sender}`);
+  
+  if (!peerConnections[sender]) {
+    console.log(`Criando nova conexão para ${sender} após receber sinal`);
+    // Importante: se receber uma oferta, NÃO devemos iniciar nossa própria oferta
+    const initiator = type !== 'offer';
+    createPeerConnection(sender, null, initiator, addRemoteVideo);
+  }
+  
+  const pc = peerConnections[sender];
+  
+  try {
+    if (type === 'offer') {
+      console.log(`Recebeu oferta, configurando conexão remota`);
+      
+      // Se já tiver uma oferta pendente, verificamos quem tem prioridade
+      if (pc.signalingState === 'have-local-offer') {
+        // Regra de desempate: ID menor alfabeticamente vence
+        if (userId < sender) {
+          console.log("Colisão de ofertas, ignorando a oferta remota (temos prioridade)");
+          return; // Ignoramos a oferta recebida
+        } else {
+          console.log("Colisão de ofertas, rolando de volta nossa oferta");
+          await pc.setLocalDescription({type: "rollback"});
+        }
+      }
+      
+      await pc.setRemoteDescription(new RTCSessionDescription(signalData));
+      
+      console.log("Criando resposta");
+      const answer = await pc.createAnswer();
+      console.log(`Resposta criada, definindo descrição local`);
+      await pc.setLocalDescription(answer);
+      
+      console.log(`Enviando resposta para ${sender}`);
+      sendSignal(sender, 'answer', answer);
+    } else if (type === 'answer') {
+      console.log(`Recebeu resposta, definindo descrição remota`);
+      await pc.setRemoteDescription(new RTCSessionDescription(signalData));
+    } else if (type === 'candidate') {
+      console.log(`Recebeu candidato ICE`);
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(signalData));
+      } catch (e) {
+        if (pc.remoteDescription) {
+          console.error(`Erro ao adicionar candidato ICE: ${e.message}`);
+        } else {
+          console.log("Armazenando candidato ICE para mais tarde");
+          if (!pc.pendingCandidates) pc.pendingCandidates = [];
+          pc.pendingCandidates.push(signalData);
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`Erro ao processar sinal ${type}: ${error.message}`);
+  }
+}
+
+// Envia um sinal para outro peer
+async function sendSignal(target, type, data) {
+  try {
+    log(`Enviando sinal ${type} para ${target}`);
+    const response = await fetch(`${SIGNALING_SERVER}/signal`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        sender: userId,
+        target,
+        type,
+        data
+      })
+    });
+    
+    const result = await response.json();
+    if (result.success) {
+      log(`Sinal ${type} enviado com sucesso para ${target}`);
+    } else {
+      log(`Falha ao enviar sinal ${type} para ${target}`);
+    }
+  } catch (error) {
+    log(`Erro ao enviar sinal ${type} para ${target}: ${error.message}`);
+  }
+}
+
+// Cria uma conexão peer para um usuário específico
+function createPeerConnection(peerId, peerName, initiator, addRemoteVideo) {
+  console.log(`Criando conexão com peer ${peerId}${initiator ? ' (como iniciador)' : ''}`);
+  
+  // Criar nova RTCPeerConnection com iceTransportPolicy forceTurn para atravessar NAT
+  const pc = new RTCPeerConnection({
+    ...configuration,
+    iceTransportPolicy: 'all' // tenta usar relay apenas se necesário
+  });
+  peerConnections[peerId] = pc;
+  
+  // Adicionar tracks locais à conexão
+  if (localStream) {
+    console.log(`Adicionando ${localStream.getTracks().length} tracks locais à conexão`);
+    localStream.getTracks().forEach(track => {
+      pc.addTrack(track, localStream);
+    });
+  }
+  
+  // Lidar com candidatos ICE
+  pc.onicecandidate = event => {
+    if (event.candidate) {
+      console.log(`Enviando candidato ICE para ${peerId}: ${event.candidate.candidate.substr(0, 50)}...`);
+      sendSignal(peerId, 'candidate', event.candidate);
+    } else {
+      console.log(`Coleta de candidatos ICE para ${peerId} concluída`);
+    }
+  };
+  
+  // Monitorar o estado da conexão
+  pc.oniceconnectionstatechange = () => {
+    console.log(`Estado ICE para ${peerId}: ${pc.iceConnectionState}`);
+    
+    // Retry de conexão se falhar
+    if (pc.iceConnectionState === 'failed') {
+      console.log(`Conexão com ${peerId} falhou, tentando reiniciar ICE`);
+      pc.restartIce();
+      
+      // Se for iniciador, tenta novamente a oferta
+      if (initiator) {
+        setTimeout(() => {
+          console.log(`Tentando nova oferta para ${peerId} após falha`);
+          createAndSendOffer(pc, peerId);
+        }, 2000);
+      }
+    }
+  };
+  
+  // Resto do código existente...
+  
+  // Lidar com estado da negociação
+  pc.onnegotiationneeded = () => {
+    log(`Negociação necessária para ${peerId}`);
+    if (initiator) {
+      log(`Iniciando negociação com ${peerId}`);
+      createAndSendOffer(pc, peerId);
+    }
+  };
+  
+  // Lidar com estado da conexão ICE
+  pc.oniceconnectionstatechange = () => {
+    log(`Conexão ICE com ${peerId} mudou para ${pc.iceConnectionState}`);
+    
+    if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+      log(`Conexão estabelecida com ${peerId}!`);
+    }
+    
+    if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
+      log(`Conexão com ${peerId} encerrada ou falhou (${pc.iceConnectionState})`);
+      if (peerConnections[peerId]) {
+        pc.close();
+        delete peerConnections[peerId];
+        
+        // Remover elemento de vídeo
+        const videoElement = document.getElementById(`video-${peerId}`);
+        if (videoElement && videoElement.parentNode) {
+          videoElement.parentNode.remove();
+        }
+      }
+    }
+  };
+  
+  // Lidar com conexão de dados (quando estabelecida)
+  pc.onconnectionstatechange = () => {
+    log(`Estado da conexão com ${peerId}: ${pc.connectionState}`);
+  };
+  
+  // Lidar com streams remotos
+  pc.ontrack = event => {
+    console.log(`[WebRTC ${new Date().toLocaleTimeString()}] Recebeu track de ${peerId}`);
+    if (!event.streams || !event.streams[0]) {
+      console.log(`[WebRTC ${new Date().toLocaleTimeString()}] Recebeu track sem stream associado`);
+      return;
+    }
+    
+    const remoteStream = event.streams[0];
+    console.log(`[WebRTC ${new Date().toLocaleTimeString()}] Processando stream remoto de ${peerId}`);
+    
+    // Chamar a função de callback para adicionar vídeo
+    if (addRemoteVideo && typeof addRemoteVideo === 'function') {
+      addRemoteVideo(remoteStream, peerId, peerName);
+    }
+  };
+  
+  // Se for o iniciador, criar e enviar oferta (com pequeno atraso)
+  if (initiator) {
+    setTimeout(() => {
+      log(`Iniciando oferta para ${peerId} após atraso`);
+      createAndSendOffer(pc, peerId);
+    }, 1000); // Pequeno atraso para garantir que tudo esteja configurado
+  }
+  
+  return pc;
+}
+
+// Cria e envia uma oferta para outro peer
+async function createAndSendOffer(pc, peerId) {
+  try {
+    log(`Criando oferta para ${peerId}`);
+    const offer = await pc.createOffer();
+    log(`Definindo descrição local para ${peerId}`);
+    await pc.setLocalDescription(offer);
+    
+    log(`Enviando oferta para ${peerId}`);
+    sendSignal(peerId, 'offer', offer);
+  } catch (error) {
+    log(`Erro ao criar/enviar oferta para ${peerId}: ${error.message}`);
+  }
+}
+
+// Parar conexões e limpar recursos
+export function disconnect() {
+  log("Desconectando de todas as chamadas");
+  isPolling = false;
+  
+  // Fechar todas as conexões peer
+  Object.values(peerConnections).forEach(pc => pc.close());
+  peerConnections = {};
+  
+  // Parar todas as tracks do stream local
+  if (localStream) {
+    localStream.getTracks().forEach(track => track.stop());
+  }
+  
+  log("Desconectado");
+}
+
+// Adiciona um stream a um elemento de vídeo
 export function addStreamToVideoElement(stream, videoElement) {
-    // Lógica para adicionar o stream ao elemento de vídeo
-    videoElement.srcObject = stream;
-    videoElement.autoplay = true;
+  log("Adicionando stream a elemento de vídeo");
+  videoElement.srcObject = stream;
+  videoElement.autoplay = true;
+  videoElement.playsInline = true;
 }
 
-  // Exemplo de adicionar uma track (pode ser vídeo, áudio ou dados)
-  const localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-  localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+// Adicione esta função de exportação para debug
+export function getDebugInfo() {
+  const debugInfo = {
+    connections: {},
+    network: navigator.onLine,
+    webRTCSupport: !!window.RTCPeerConnection,
+    mediaDevices: !!navigator.mediaDevices
+  };
   
-  // Chame a função assíncrona para iniciar a chamada
-  startCall();
+  // Obtenha estado das conexões
+  for (const peerId in peerConnections) {
+    const pc = peerConnections[peerId];
+    debugInfo.connections[peerId] = {
+      iceConnectionState: pc.iceConnectionState,
+      connectionState: pc.connectionState,
+      signalingState: pc.signalingState,
+      iceCandidates: pc.remoteDescription ? 'Sim' : 'Não'
+    };
+  }
   
+  return debugInfo;
+}
