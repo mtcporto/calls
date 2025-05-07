@@ -73,7 +73,29 @@ if (!roomCode) {
 // Atualizar UI com informações da sala
 roomCodeElement.textContent = formatRoomCode(roomCode);
 document.title = `Meet: ${formatRoomCode(roomCode)}`;
-meetingLinkInput.value = `${window.location.origin}/calls/calls.html?room=${roomCode}`;
+updateMeetingLink();
+
+// Atualizar URL do link de compartilhamento
+function updateMeetingLink() {
+  // Obter a URL base do site atual
+  const baseUrl = window.location.origin;
+  const fullPath = window.location.pathname;
+  
+  // Determinar o path correto para a página calls.html
+  let callsPath;
+  if (fullPath.includes('/')) {
+    // Obter o diretório atual
+    const pathParts = fullPath.split('/');
+    pathParts.pop(); // Remover o arquivo atual
+    callsPath = pathParts.join('/') + '/calls.html';
+  } else {
+    callsPath = '/calls.html';
+  }
+  
+  // Montar a URL completa para compartilhamento
+  const shareUrl = `${baseUrl}${callsPath}?room=${roomCode}`;
+  meetingLinkInput.value = shareUrl;
+}
 
 // Atualizar relógio
 function updateClock() {
@@ -303,10 +325,30 @@ function handleRemoteStream(stream, userId, userName) {
 // Função para iniciar stream local
 async function startLocalStream(videoDeviceId, audioDeviceId) {
   try {
-    // Configuração para preferir câmera frontal (especialmente em dispositivos móveis)
-    const videoConstraints = videoDeviceId ? 
-      { deviceId: { exact: videoDeviceId } } : 
-      { facingMode: { ideal: "user" }, width: { ideal: 1280 }, height: { ideal: 720 } };
+    // Configuração para forçar o uso da câmera frontal em dispositivos móveis
+    let videoConstraints;
+    
+    if (videoDeviceId) {
+      // Se um deviceId específico foi fornecido, use-o
+      videoConstraints = { deviceId: { exact: videoDeviceId } };
+    } else {
+      // Em dispositivos móveis, forçar o uso da câmera frontal
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      
+      if (isMobile) {
+        videoConstraints = { 
+          facingMode: { exact: "user" }, // Força câmera frontal
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        };
+      } else {
+        // Em desktop, usar configurações padrão
+        videoConstraints = { 
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        };
+      }
+    }
 
     const constraints = {
       audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true,
@@ -333,6 +375,29 @@ async function startLocalStream(videoDeviceId, audioDeviceId) {
     return localStream;
   } catch (error) {
     console.error("Erro ao obter mídia local:", error);
+    // Se falhar ao tentar forçar câmera frontal, tentar novamente sem exigência tão rígida
+    if (error.name === 'OverconstrainedError' && !videoDeviceId) {
+      console.log("Tentando novamente com configurações mais flexíveis...");
+      try {
+        const flexibleConstraints = {
+          audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true,
+          video: { facingMode: "user" } // Preferência por câmera frontal sem 'exact'
+        };
+        
+        localStream = await navigator.mediaDevices.getUserMedia(flexibleConstraints);
+        console.log("Stream local obtido com configurações flexíveis:", 
+                   localStream.getTracks().map(t => `${t.kind}:${t.label}`));
+        
+        const localVideo = document.getElementById('video-local');
+        if (localVideo) {
+          localVideo.srcObject = localStream;
+        }
+        
+        return localStream;
+      } catch (flexibleError) {
+        console.error("Erro mesmo com configurações flexíveis:", flexibleError);
+      }
+    }
     // Retornar null em caso de erro para tratamento adequado
     return null;
   }

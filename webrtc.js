@@ -388,7 +388,14 @@ function createPeerConnection(peerId, peerName, initiator, addRemoteVideo) {
   pc.ontrack = event => {
     console.log(`[WebRTC ${new Date().toLocaleTimeString()}] Recebeu track de ${peerId}`);
     if (!event.streams || !event.streams[0]) {
-      console.log(`[WebRTC ${new Date().toLocaleTimeString()}] Recebeu track sem stream associado`);
+      console.log(`[WebRTC ${new Date().toLocaleTimeString()}] Recebeu track sem stream associado, criando stream manualmente`);
+      // Criar um novo stream se não houver um associado à track
+      const syntheticStream = new MediaStream([event.track]);
+      
+      // Chamar a função de callback para adicionar vídeo com o stream sintético
+      if (addRemoteVideo && typeof addRemoteVideo === 'function') {
+        addRemoteVideo(syntheticStream, peerId, peerName);
+      }
       return;
     }
     
