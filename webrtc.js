@@ -54,6 +54,9 @@ let lastPollTime = 0;
 let audioStatus = true;
 let videoStatus = true;
 
+// Canal de dados para transmitir status do microfone/câmera entre participantes
+let dataChannels = {};
+
 // Log personalizado
 function log(message) {
   console.log(`[WebRTC ${new Date().toLocaleTimeString()}] ${message}`);
@@ -441,12 +444,66 @@ export function disconnect() {
   log("Desconectado");
 }
 
-// Adiciona um stream a um elemento de vídeo
-export function addStreamToVideoElement(stream, videoElement) {
+// Adicionar função para garantir que o vídeo remoto seja exibido
+function ensureVideoIsVisible(videoElement, peerId) {
+  // Verificar periodicamente se o vídeo está realmente reproduzindo
+  let attempts = 0;
+  const checkInterval = setInterval(() => {
+    if (attempts > 10) {
+      clearInterval(checkInterval);
+      return;
+    }
+    attempts++;
+    
+    if (videoElement.paused || videoElement.videoWidth === 0) {
+      console.log(`Tentativa ${attempts} de reproduzir vídeo do peer ${peerId}`);
+      videoElement.play().catch(e => console.log('Erro ao forçar play:', e));
+    } else {
+      console.log(`Vídeo do peer ${peerId} está reproduzindo!`);
+      clearInterval(checkInterval);
+      
+      // Disparar um evento para notificar que o vídeo está ativo
+      const event = new CustomEvent('video-active', { 
+        detail: { peerId: peerId } 
+      });
+      window.dispatchEvent(event);
+    }
+  }, 1000);
+}
+
+export function addStreamToVideoElement(stream, videoElement, peerId) {
   log("Adicionando stream a elemento de vídeo");
   videoElement.srcObject = stream;
   videoElement.autoplay = true;
   videoElement.playsInline = true;
+  videoElement.muted = true; // Adicionar esta linha para garantir que possa autoplay
+  
+  // Forçar play com tratamento de erro
+  const playPromise = videoElement.play();
+  
+  if (playPromise !== undefined) {
+    playPromise.catch(error => {
+      console.warn('Erro ao reproduzir vídeo automaticamente:', error);
+      // Mostrar botão de play se autoplay falhar
+      const container = videoElement.parentElement;
+      if (container) {
+        const playButton = document.createElement('button');
+        playButton.className = 'video-play-button';
+        playButton.innerHTML = '<i class="fas fa-play"></i>';
+        playButton.onclick = () => {
+          videoElement.play()
+            .then(() => playButton.remove())
+            .catch(e => console.log('Erro ao forçar play:', e));
+        };
+        container.appendChild(playButton);
+      }
+    });
+  }
+  
+  // Registrar evento loadedmetadata para garantir reprodução
+  videoElement.addEventListener('loadedmetadata', () => {
+    videoElement.play().catch(e => console.log('Erro no loadedmetadata:', e));
+  });
 }
 
 // Adicione esta função de exportação para debug
@@ -506,4 +563,74 @@ export function updateRemoteMediaUI(userId, audioEnabled, videoEnabled) {
   if (container) {
     container.classList.toggle('video-off', !videoEnabled);
   }
+}
+
+// Modificar o handler de novos usuários para criar conexões
+function handleNewUser(user) {
+  if (user.id === myId) return; // Não conectar a si mesmo
+  
+  console.log(`Novo usuário detectado: ${user.name} (${user.id})`);
+  
+  // Iniciar conexão como initiator
+  createPeerConnection(user.id, user.name, true);
+  
+  // Criar e enviar oferta
+  const pc = peerConnections[user.id];
+  if (pc) {
+    pc.createOffer()
+      .then(offer => pc.setLocalDescription(offer))
+      .then(() => {
+        sendSignal(user.id, {
+          type: 'offer',
+          sdp: pc.localDescription
+        });
+        console.log(`Oferta enviada para ${user.name}`);
+      })
+      .catch(err => console.error('Erro ao criar oferta:', err));
+  }
+}
+
+// Garantir que o processamento de sinais esteja correto
+// Adicionar um conjunto para rastrear sinais já processados
+const processedSignals = new Set();
+
+function processSignals(signals) {
+  signals.forEach(signal => {
+    const { from, data, id } = signal;
+    
+    // Verificar se este sinal já foi processado (usando ID único)
+    const signalId = id || `${from}-${data.type}-${Date.now()}`;
+    if (processedSignals.has(signalId)) {
+      console.log(`Sinal duplicado ignorado: ${data.type} de ${from}`);
+      return;
+    }
+    
+    // Marcar sinal como processado
+    processedSignals.add(signalId);
+    
+    // Limitar tamanho do conjunto para evitar crescimento infinito
+    if (processedSignals.size > 1000) {
+      const iterator = processedSignals.values();
+      processedSignals.delete(iterator.next().value);
+    }
+    
+    console.log(`Processando sinal ${data.type} de ${from}`);
+    
+    // Resto do código de processamento existente...
+    // ...
+    
+    // Para sinais 'answer', verificar o estado atual antes de aplicar
+    if (data.type === 'answer') {
+      const pc = peerConnections[from];
+      if (pc && pc.signalingState === 'have-local-offer') {
+        // Só aplicar resposta se estivermos no estado correto
+        pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+          .catch(err => console.error('Erro ao processar resposta:', err));
+      } else {
+        console.log(`Ignorando resposta de ${from}, estado atual: ${pc ? pc.signalingState : 'conexão não encontrada'}`);
+      }
+    }
+    
+    // ...resto do código existente...
+  });
 }

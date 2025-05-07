@@ -10,10 +10,28 @@
 </head>
 <body class="login-page">
   <div class="login-container">
+    <!-- Título principal centralizado -->
+    <h1 class="text-center mb-4">WebRTC Meet</h1>
+    
     <div class="tab-content" id="tab-content">
-      <!-- Aba de entrada em sala existente -->
-      <div class="tab-pane active" id="join-tab">
-        <h1>Entrar em Reunião</h1>
+      <!-- Aba principal - Criar reunião é o fluxo principal -->
+      <div class="tab-pane active" id="create-tab">
+        <h2 class="h3 mb-3">Criar Reunião</h2>
+        <form id="create-form">
+          <div class="form-group mb-3">
+            <label for="create-name" class="form-label">Seu nome</label>
+            <input type="text" id="create-name" class="form-control" placeholder="Digite seu nome" required>
+          </div>
+          <button type="submit" class="btn btn-primary w-100 mt-3">Iniciar Reunião</button>
+          <div class="text-center mt-3">
+            <a href="#" id="switch-to-join" class="text-decoration-none">Entrar em sala existente</a>
+          </div>
+        </form>
+      </div>
+      
+      <!-- Aba secundária - Entrar em reunião existente -->
+      <div class="tab-pane" id="join-tab">
+        <h2 class="h3 mb-3">Entrar em Reunião</h2>
         <form id="join-form">
           <div class="form-group mb-3">
             <label for="join-name" class="form-label">Seu nome</label>
@@ -23,27 +41,17 @@
             <label for="room-code" class="form-label">Código da sala</label>
             <input type="text" id="room-code" class="form-control" placeholder="xxx-xxxx-xxx" required>
           </div>
-          <button type="submit" class="btn btn-primary mt-3">Entrar na Reunião</button>
+          <button type="submit" class="btn btn-primary w-100 mt-3">Entrar na Reunião</button>
           <div class="text-center mt-3">
             <a href="#" id="switch-to-create" class="text-decoration-none">Criar nova sala</a>
           </div>
         </form>
       </div>
-      
-      <!-- Aba de criação de nova sala -->
-      <div class="tab-pane" id="create-tab">
-        <h1>Criar Reunião</h1>
-        <form id="create-form">
-          <div class="form-group mb-3">
-            <label for="create-name" class="form-label">Seu nome</label>
-            <input type="text" id="create-name" class="form-control" placeholder="Digite seu nome" required>
-          </div>
-          <button type="submit" class="btn btn-primary mt-3">Iniciar Reunião</button>
-          <div class="text-center mt-3">
-            <a href="#" id="switch-to-join" class="text-decoration-none">Entrar em sala existente</a>
-          </div>
-        </form>
-      </div>
+    </div>
+    
+    <!-- Rodapé -->
+    <div class="text-center mt-4 text-secondary">
+      <small>&copy; 2025 WebRTC Meet</small>
     </div>
   </div>
   

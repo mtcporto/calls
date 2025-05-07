@@ -1,4 +1,35 @@
-import { connectToRoom, addStreamToVideoElement, disconnect, getDebugInfo } from './webrtc.js';
+import { connectToRoom, addStreamToVideoElement, disconnect, getDebugInfo, updateMediaStatus } from './webrtc.js';
+
+// Adicione isso no topo do arquivo para verificar importações
+
+console.log('Calls.js carregado');
+
+// Verificar se as funções do webrtc.js estão sendo importadas corretamente
+console.log('Funções importadas de webrtc.js:', {
+  connectToRoom: typeof connectToRoom,
+  addStreamToVideoElement: typeof addStreamToVideoElement,
+  disconnect: typeof disconnect,
+  getDebugInfo: typeof getDebugInfo
+});
+
+// Adicionar no início do arquivo, após as importações
+
+// Log detalhado para diagnóstico
+console.log('==== DIAGNÓSTICO WEBRTC MEET ====');
+console.log('Versão: 1.2.1');
+console.log('Data: ' + new Date().toISOString());
+console.log('User Agent: ' + navigator.userAgent);
+console.log('Suporte ao WebRTC:', 
+  'RTCPeerConnection' in window ? 'Sim' : 'Não',
+  'getUserMedia' in navigator.mediaDevices ? 'Sim' : 'Não',
+  'RTCDataChannel' in window ? 'Sim' : 'Não'
+);
+console.log('================================');
+
+// Log de erro global para capturar erros não tratados
+window.addEventListener('error', function(event) {
+  console.error('ERRO GLOBAL:', event.message, 'em', event.filename, 'linha', event.lineno);
+});
 
 // Variáveis
 let localStream;
@@ -155,32 +186,48 @@ function toggleMainVideo(id) {
   activeSpeakerId = id;
 }
 
-// Lidar com stream remoto
+// Modificar a função handleRemoteStream para garantir que os vídeos PIP sejam exibidos corretamente
+
 function handleRemoteStream(stream, userId, userName) {
+  console.log('Handle remote stream called for', userId);
+  
   // Verificar se o container já existe
   const existingContainer = document.getElementById(`container-${userId}`);
   if (existingContainer) {
     const video = document.getElementById(`video-${userId}`);
-    video.srcObject = stream;
+    if (video) {
+      video.srcObject = stream;
+      video.play().catch(e => console.log('Erro ao reproduzir vídeo:', e));
+    }
     return;
   }
   
   // Criar novo container de vídeo
   const container = createVideoContainer(userId, userName, stream);
   
-  // Colocar no PIP se temos um vídeo principal
-  // Ou como principal se não há vídeo principal ainda
-  if (mainVideoContainer.querySelector('.video-container')) {
-    container.classList.add('pip-video');
-    pipContainer.appendChild(container);
-  } else {
-    container.classList.add('main-video');
-    mainVideoContainer.appendChild(container);
-    activeSpeakerId = userId;
+  // Garantir que o pipContainer exista
+  if (!pipContainer) {
+    console.error('Elemento pip-container não encontrado, recriando...');
+    const videoArea = document.querySelector('.video-area');
+    const newPipContainer = document.createElement('div');
+    newPipContainer.id = 'pip-container';
+    newPipContainer.className = 'pip-container';
+    videoArea.appendChild(newPipContainer);
+    pipContainer = newPipContainer;
   }
   
-  // Configurar detecção de áudio para este stream
-  detectAudioActivity(stream, userId);
+  // Adicionar ao PIP ou como vídeo principal
+  if (mainVideoContainer.querySelector('.video-container')) {
+    pipContainer.appendChild(container);
+  } else {
+    mainVideoContainer.appendChild(container);
+  }
+  
+  // Forçar reprodução do vídeo
+  const video = document.getElementById(`video-${userId}`);
+  if (video) {
+    video.play().catch(e => console.log('Erro ao reproduzir vídeo remoto:', e));
+  }
 }
 
 // Função para iniciar stream local
@@ -207,7 +254,7 @@ async function startLocalStream(videoDeviceId, audioDeviceId) {
   return localStream;
 }
 
-// Adicionar lógica para detecção e priorização de headsets
+// Melhorar a lógica para priorizar headsets na função updateDeviceList()
 
 async function updateDeviceList() {
   try {
@@ -218,90 +265,117 @@ async function updateDeviceList() {
     microphoneSelect.innerHTML = '';
     speakerSelect.innerHTML = '';
     
-    // Arrays para armazenar dispositivos
+    // Arrays para dispositivos
     const cameras = devices.filter(d => d.kind === 'videoinput');
     const microphones = devices.filter(d => d.kind === 'audioinput');
     const speakers = devices.filter(d => d.kind === 'audiooutput');
     
-    // Mapear dispositivos por groupId para detectar headsets
-    const deviceGroups = {};
+    console.log('Dispositivos detectados:', {
+      cameras: cameras.length,
+      microphones: microphones.length,
+      speakers: speakers.length
+    });
     
-    // Agrupar dispositivos pelo groupId (mesmo dispositivo físico)
-    for (const device of [...microphones, ...speakers]) {
-      if (!deviceGroups[device.groupId]) {
-        deviceGroups[device.groupId] = {
+    // Identificar headsets (dispositivos com mesmo groupId para entrada e saída de áudio)
+    const audioDeviceGroups = new Map();
+    
+    // Agrupar por groupId
+    [...microphones, ...speakers].forEach(device => {
+      if (!audioDeviceGroups.has(device.groupId)) {
+        audioDeviceGroups.set(device.groupId, {
           groupId: device.groupId,
-          label: device.label,
+          name: device.label || 'Dispositivo desconhecido',
           microphone: null,
           speaker: null,
-          count: 0
-        };
+          isHeadset: false,
+          score: 0  // Pontuação para priorização
+        });
       }
+      
+      const group = audioDeviceGroups.get(device.groupId);
       
       if (device.kind === 'audioinput') {
-        deviceGroups[device.groupId].microphone = device;
+        group.microphone = device;
       } else if (device.kind === 'audiooutput') {
-        deviceGroups[device.groupId].speaker = device;
+        group.speaker = device;
       }
-      
-      deviceGroups[device.groupId].count++;
+    });
+    
+    // Avaliar e pontuar os dispositivos de áudio para encontrar o melhor headset
+    for (const group of audioDeviceGroups.values()) {
+      // Critério principal: tem entrada e saída = possível headset
+      if (group.microphone && group.speaker) {
+        group.isHeadset = true;
+        group.score += 10;
+        
+        // Critérios adicionais
+        const name = group.name.toLowerCase();
+        if (name.includes('headset') || name.includes('auricular') || name.includes('fone')) {
+          group.score += 5;
+        }
+        if (name.includes('bluetooth')) {
+          group.score += 3;
+        }
+        if (name.includes('usb')) {
+          group.score += 2;
+        }
+      }
     }
     
-    // Encontrar headset (dispositivo com entrada e saída de áudio)
-    let headset = null;
-    for (const groupId in deviceGroups) {
-      if (deviceGroups[groupId].microphone && deviceGroups[groupId].speaker) {
-        headset = deviceGroups[groupId];
-        break;
+    // Encontrar o melhor dispositivo de áudio
+    let bestHeadset = null;
+    let bestScore = -1;
+    
+    for (const group of audioDeviceGroups.values()) {
+      if (group.score > bestScore) {
+        bestHeadset = group;
+        bestScore = group.score;
       }
     }
     
-    // Adicionar câmeras
-    cameras.forEach((device, index) => {
+    console.log("Dispositivos de áudio agrupados:", Array.from(audioDeviceGroups.values()));
+    console.log("Melhor headset detectado:", bestHeadset);
+    
+    // Adicionar câmeras ao select
+    cameras.forEach(device => {
       const option = document.createElement('option');
       option.value = device.deviceId;
-      option.text = device.label || `Câmera ${index + 1}`;
+      option.text = device.label || `Câmera ${cameraSelect.options.length + 1}`;
       cameraSelect.appendChild(option);
     });
     
-    // Adicionar microfones (priorizar o do headset se existir)
-    let headsetMicSelected = false;
-    microphones.forEach((device, index) => {
+    // Adicionar microfones ao select, priorizando o headset
+    microphones.forEach(device => {
       const option = document.createElement('option');
       option.value = device.deviceId;
-      option.text = device.label || `Microfone ${index + 1}`;
+      option.text = device.label || `Microfone ${microphoneSelect.options.length + 1}`;
       
       // Selecionar automaticamente o microfone do headset
-      if (headset && headset.microphone && device.deviceId === headset.microphone.deviceId) {
+      if (bestHeadset && bestHeadset.microphone && 
+          device.deviceId === bestHeadset.microphone.deviceId) {
         option.selected = true;
-        headsetMicSelected = true;
       }
       
       microphoneSelect.appendChild(option);
     });
     
-    // Adicionar alto-falantes (priorizar o do headset se existir)
+    // Adicionar alto-falantes ao select, priorizando o headset
     if (speakers.length > 0) {
-      let headsetSpeakerSelected = false;
-      speakers.forEach((device, index) => {
+      speakers.forEach(device => {
         const option = document.createElement('option');
         option.value = device.deviceId;
-        option.text = device.label || `Alto-falante ${index + 1}`;
+        option.text = device.label || `Alto-falante ${speakerSelect.options.length + 1}`;
         
         // Selecionar automaticamente o alto-falante do headset
-        if (headset && headset.speaker && device.deviceId === headset.speaker.deviceId) {
+        if (bestHeadset && bestHeadset.speaker && 
+            device.deviceId === bestHeadset.speaker.deviceId) {
           option.selected = true;
-          headsetSpeakerSelected = true;
         }
         
         speakerSelect.appendChild(option);
       });
-      
-      // Se temos um headset mas ele não foi selecionado (caso raro)
-      if (headset && headset.speaker && !headsetSpeakerSelected) {
-        speakerSelect.value = headset.speaker.deviceId;
-      }
     } else {
+      // Se não há seleção de saída de áudio disponível
       const option = document.createElement('option');
       option.value = '';
       option.text = 'Alto-falante padrão';
@@ -309,21 +383,25 @@ async function updateDeviceList() {
       speakerSelect.disabled = true;
     }
     
-    // Se temos um headset selecionado, aplicá-lo
-    if (headset && headsetMicSelected) {
-      // Atualizar stream com dispositivo selecionado
-      await startLocalStream(cameraSelect.value, headset.microphone.deviceId);
+    // Iniciar o stream com os dispositivos selecionados
+    if (microphones.length > 0) {
+      const selectedMicId = microphoneSelect.value;
+      const selectedCamId = cameraSelect.value;
       
-      // Aplicar ao audio output se suportado
-      if (headset.speaker && typeof HTMLMediaElement.prototype.setSinkId === 'function') {
-        const videos = document.querySelectorAll('video');
+      console.log(`Aplicando configurações: Câmera=${selectedCamId}, Microfone=${selectedMicId}`);
+      await startLocalStream(selectedCamId, selectedMicId);
+      
+      // Aplicar o alto-falante selecionado a todos os vídeos
+      if (typeof HTMLMediaElement.prototype.setSinkId === 'function' && speakerSelect.value) {
+        const videos = document.querySelectorAll('video:not(#video-local)');
         videos.forEach(video => {
-          if (video.id !== 'video-local') {
-            video.setSinkId(headset.speaker.deviceId);
-          }
+          video.setSinkId(speakerSelect.value).catch(e => {
+            console.warn('Erro ao definir sink ID:', e);
+          });
         });
       }
     }
+    
   } catch (error) {
     console.error('Erro ao listar dispositivos:', error);
   }
@@ -526,5 +604,46 @@ document.getElementById('debug-button').addEventListener('click', () => {
   }
 });
 
-// Inicializar a aplicação
-init();
+// Garantir que o evento DOMContentLoaded seja disparado antes de inicializar
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('DOM carregado, verificando elementos críticos:');
+  console.log('- toggleAudioButton:', toggleAudioButton ? 'OK' : 'Não encontrado');
+  console.log('- toggleVideoButton:', toggleVideoButton ? 'OK' : 'Não encontrado');
+  console.log('- mainVideoContainer:', mainVideoContainer ? 'OK' : 'Não encontrado');
+  console.log('- pipContainer:', pipContainer ? 'OK' : 'Não encontrado');
+  
+  // Inicializar a aplicação
+  init();
+});
+
+// Ouvir eventos de status de mídia remota
+window.addEventListener('remote-media-status', (event) => {
+  const { peerId, audio, video } = event.detail;
+  
+  // Atualizar ícones de status para o participante
+  const container = document.getElementById(`container-${peerId}`);
+  if (container) {
+    // Atualizar status de microfone
+    const micStatus = container.querySelector('.mic-status');
+    if (micStatus) {
+      micStatus.innerHTML = audio ? 
+        '<i class="fas fa-microphone"></i>' : 
+        '<i class="fas fa-microphone-slash"></i>';
+      micStatus.classList.toggle('disabled', !audio);
+    }
+    
+    // Atualizar status de vídeo (adicionar um indicador visual quando o vídeo estiver desligado)
+    container.classList.toggle('video-off', !video);
+  }
+});
+
+// Em calls.js, adicionar esse listener
+window.addEventListener('video-active', (event) => {
+  const { peerId } = event.detail;
+  const container = document.getElementById(`container-${peerId}`);
+  if (container) {
+    container.classList.add('video-active');
+    container.classList.remove('video-off');
+  }
+});
+

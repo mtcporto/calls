@@ -24,7 +24,7 @@ html, body {
   overflow: hidden;
 }
 
-/* Estilos da página index e sala */
+/* Estilos da página index */
 body.login-page {
   display: flex;
   justify-content: center;
@@ -81,27 +81,17 @@ body.login-page {
   border-color: #1765cc;
 }
 
-.login-container .btn-secondary {
-  background-color: transparent;
-  border-color: var(--border-color);
-  color: var(--text-color);
-}
-
-.login-container .btn-secondary:hover,
-.login-container .btn-secondary:focus {
-  background-color: var(--hover-color);
-}
-
 .form-label {
   color: var(--text-color);
   margin-bottom: 8px;
 }
 
-/* Novo layout para a sala de reunião */
+/* Layout da sala de reunião */
 .meet-container {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  overflow: hidden;
   position: relative;
 }
 
@@ -109,9 +99,10 @@ body.login-page {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
-  height: 64px;
+  padding: 8px 16px;
+  height: 56px;
   z-index: 10;
+  background-color: var(--surface-color);
 }
 
 .meet-info {
@@ -158,25 +149,25 @@ body.login-page {
   flex: 1;
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Ajustes para o container principal de vídeo */
 .main-video-container {
-  position: absolute;
-  top: 64px; /* Altura do header */
-  bottom: 80px; /* Espaço para controles */
-  left: 0;
-  right: 0;
+  flex: 1;
+  width: 100%;
+  position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
   overflow: hidden;
+  background-color: #000;
 }
 
 .main-video-container .video-container {
   height: 100%;
   width: 100%;
-  max-height: calc(100vh - 144px); /* 100vh menos header e controles */
+  max-height: calc(100vh - 144px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -184,29 +175,65 @@ body.login-page {
 }
 
 .video-container {
+  position: relative;
   max-height: 100%;
   max-width: 100%;
   aspect-ratio: 16/9;
   background-color: #000;
   border-radius: 8px;
+  overflow: hidden;
 }
 
 .video-container video {
-  max-height: 100%;
-  max-width: 100%;
-  object-fit: contain; /* Mantém proporção sem cortar */
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background-color: #1a1a1a;
   transform: scaleX(-1);
 }
 
-/* Controles reposicionados para aparecer sobre o vídeo */
-.call-controls {
+.video-container.video-off video {
+  opacity: 0.3;
+}
+
+.video-container.video-off::after {
+  content: '';
   position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #1a1a1a;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"></path><circle cx="12" cy="10" r="3"></circle><path d="M12 13c-2.67 0-8 1.34-8 4v1h16v-1c0-2.66-5.33-4-8-4z"></path></svg>');
+  background-repeat: no-repeat;
+  background-position: center;
+  z-index: 5;
+}
+
+.video-play-button {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: rgba(0, 0, 0, 0.6);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  font-size: 24px;
+  cursor: pointer;
+  z-index: 10;
+}
+
+/* Barra de controles */
+.call-controls {
+  position: fixed;
   left: 50%;
   bottom: 20px;
   transform: translateX(-50%);
-  display: flex !important;
-  flex-direction: row !important;
-  justify-content: center !important;
+  display: flex;
+  justify-content: center;
   align-items: center;
   gap: 12px;
   background-color: rgba(32, 33, 36, 0.8);
@@ -267,62 +294,42 @@ body.login-page {
   cursor: pointer;
 }
 
-/* Video containers */
-.video-container {
-  position: relative;
-  background-color: #000;
-  overflow: hidden;
-  border-radius: 8px;
-}
-
-.main-video {
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-}
-
-/* PIP container reposicionado para sobrepor no canto direito */
+/* PIP Container */
 .pip-container {
   position: absolute;
-  bottom: 100px;
-  right: 20px;
+  top: 70px;
+  right: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   z-index: 90;
+  max-height: calc(100vh - 160px);
+  overflow: hidden;
 }
 
-.pip-video {
-  width: 180px;
-  height: 100px;
+.pip-container .video-container {
+  width: 160px;
+  height: 90px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
   transition: transform 0.2s;
   cursor: pointer;
 }
 
-.pip-video:hover {
+.pip-container .video-container:hover {
   transform: scale(1.05);
-}
-
-/* Videos */
-.video-container video {
-  width: 100%;
-  height: 100%;
-  object-fit: contain; /* Alterado de "cover" para manter a proporção */
-  transform: scaleX(-1); /* Espelhar horizontalmente */
+  z-index: 91;
 }
 
 /* Nome do participante */
 .participant-name {
   position: absolute;
-  bottom: 10px;
-  left: 10px;
+  bottom: 8px;
+  left: 8px;
   background-color: rgba(0, 0, 0, 0.6);
   color: white;
-  padding: 4px 8px;
+  padding: 3px 8px;
   border-radius: 4px;
-  font-size: 14px;
+  font-size: 12px;
   z-index: 10;
 }
 
@@ -330,7 +337,7 @@ body.login-page {
 .status-icons {
   position: absolute;
   top: 10px;
-  right: 10px;
+  left: 10px;
   display: flex;
   gap: 8px;
 }
@@ -345,19 +352,6 @@ body.login-page {
   background-color: rgba(0, 0, 0, 0.6);
   color: white;
   font-size: 12px;
-}
-
-/* Quando o vídeo está desligado */
-.video-container.video-off::after {
-  content: '\f03e';
-  font-family: 'Font Awesome 5 Free';
-  font-weight: 900;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 48px;
-  color: var(--secondary-text-color);
 }
 
 /* Menus de configurações */
@@ -451,61 +445,94 @@ body.login-page {
   display: none;
 }
 
-/* Responsividade */
+/* Responsividade - Mobile */
 @media (max-width: 768px) {
-  .call-controls {
-    bottom: 10px;
-    gap: 8px;
-    padding: 6px 12px;
+  .meet-header {
+    height: 48px;
+    padding: 8px 12px;
   }
   
-  .control-button {
-    width: 42px;
-    height: 42px;
-  }
-  
-  .pip-container {
-    bottom: 80px;
-    right: 10px;
-  }
-  
-  .pip-video {
-    width: 120px;
-    height: 68px;
-  }
-  
-  .settings-menu {
-    width: 260px;
-  }
-}
-
-/* Ajustes para responsividade em dispositivos móveis */
-@media (max-aspect-ratio: 1/1) {
-  /* Estilos para orientação vertical */
+  /* Barra de controles mobile */
   .call-controls {
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
-    padding: 10px;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
     background-color: rgba(32, 33, 36, 0.9);
-    border-radius: 0;
-    justify-content: space-around;
+    padding: 12px 0;
     z-index: 100;
-  }
-  
-  .pip-container {
-    bottom: 70px;
-    right: 10px;
-    max-width: 30%;
-  }
-  
-  .main-video-container {
-    bottom: 60px;
+    border-radius: 0;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3);
   }
   
   .control-button {
-    width: 42px;
-    height: 42px;
+    width: 44px;
+    height: 44px;
+    margin: 0 8px;
   }
+  
+  /* PIP Container mobile */
+  .pip-container {
+    position: absolute;
+    bottom: 75px;
+    right: 10px;
+    top: auto;
+    max-height: 30%;
+    max-width: 40%;
+    flex-direction: column;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .pip-container .video-container {
+    width: 120px;
+    height: 68px;
+  }
+  
+  /* Esconder scrollbar no mobile */
+  .pip-container::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Responsividade - Desktop hover effects */
+@media (min-width: 769px) {
+  .pip-container {
+    overflow: hidden;
+  }
+  
+  .pip-container:hover {
+    overflow-y: auto;
+    padding-right: 5px;
+  }
+  
+  /* Estilizar a scrollbar */
+  .pip-container::-webkit-scrollbar {
+    width: 5px;
+  }
+  
+  .pip-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .pip-container::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 3px;
+  }
+}
+
+/* Animação para indicar status ativo */
+.video-container.speaker-active {
+  border: 2px solid var(--primary-color);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(26, 115, 232, 0.7); }
+  70% { box-shadow: 0 0 0 6px rgba(26, 115, 232, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(26, 115, 232, 0); }
 }
