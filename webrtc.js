@@ -1,41 +1,41 @@
 // Configuração dos servidores STUN/TURN públicos
 const configuration = {
   iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    // Servidores TURN gratuitos adicionais
+    // Servidores STUN
+    { 
+      urls: [
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302',
+        'stun:stun2.l.google.com:19302',
+        'stun:stun3.l.google.com:19302',
+        'stun:stun4.l.google.com:19302'
+      ] 
+    },
+    
+    // Servidores TURN gratuitos para casos de NAT restrito
     {
-      urls: 'turn:openrelay.metered.ca:80',
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp'
+      ],
       username: 'openrelayproject',
       credential: 'openrelayproject'
     },
+    
+    // Servidores TURN adicionais com credenciais
     {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    // Adicione esses servidores TURN gratuitos
-    {
-      urls: 'turn:relay.metered.ca:80',
-      username: 'e8d34faf7cb62de234b299da',
-      credential: 'uGP8+dMDCQIK+DRo'
-    },
-    {
-      urls: 'turn:relay.metered.ca:443',
-      username: 'e8d34faf7cb62de234b299da',
-      credential: 'uGP8+dMDCQIK+DRo'
-    },
-    {
-      urls: 'turn:relay.metered.ca:443?transport=tcp',
+      urls: [
+        'turn:relay.metered.ca:80',
+        'turn:relay.metered.ca:443',
+        'turn:relay.metered.ca:443?transport=tcp'
+      ],
       username: 'e8d34faf7cb62de234b299da',
       credential: 'uGP8+dMDCQIK+DRo'
     }
-  ]
+  ],
+  iceCandidatePoolSize: 10,
+  iceTransportPolicy: 'all' // usar 'relay' se quiser forçar TURN
 };
 
 // URL do servidor de sinalização (Cloudflare Worker)
@@ -476,7 +476,7 @@ export function addStreamToVideoElement(stream, videoElement, peerId) {
   videoElement.srcObject = stream;
   videoElement.autoplay = true;
   videoElement.playsInline = true;
-  videoElement.muted = true; // Adicionar esta linha para garantir que possa autoplay
+  videoElement.muted = peerId === 'local'; // Mutar apenas o vídeo local
   
   // Forçar play com tratamento de erro
   const playPromise = videoElement.play();
@@ -504,6 +504,11 @@ export function addStreamToVideoElement(stream, videoElement, peerId) {
   videoElement.addEventListener('loadedmetadata', () => {
     videoElement.play().catch(e => console.log('Erro no loadedmetadata:', e));
   });
+  
+  // Verificar periodicamente se o vídeo está sendo exibido corretamente
+  if (peerId !== 'local') {
+    ensureVideoIsVisible(videoElement, peerId);
+  }
 }
 
 // Adicione esta função de exportação para debug
@@ -634,3 +639,13 @@ function processSignals(signals) {
     // ...resto do código existente...
   });
 }
+
+// No final do arquivo
+export default {
+  connectToRoom,
+  addStreamToVideoElement,
+  disconnect,
+  getDebugInfo,
+  updateMediaStatus,
+  updateRemoteMediaUI
+};

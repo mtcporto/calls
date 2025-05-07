@@ -536,3 +536,27 @@ body.login-page {
   70% { box-shadow: 0 0 0 6px rgba(26, 115, 232, 0); }
   100% { box-shadow: 0 0 0 0 rgba(26, 115, 232, 0); }
 }
+
+/* Adicionar compatibilidade com Safari iOS */
+video {
+  -webkit-transform: scaleX(-1);
+  transform: scaleX(-1);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Correção para vídeos em tela cheia no iOS */
+video::-webkit-media-controls {
+  display: none !important;
+}
+
+/* Especificidades para iOS */
+@supports (-webkit-touch-callout: none) {
+  .video-container video {
+    object-fit: contain;
+  }
+  
+  .main-video-container .video-container video {
+    object-fit: cover;
+  }
+}

@@ -25,15 +25,37 @@ async function handleRequest(request) {
     const data = await request.json();
     const { room, id, name } = data;
     
+    if (!room || !id) {
+      return new Response(JSON.stringify({ 
+        success: false, 
+        error: 'Parâmetros inválidos' 
+      }), {
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json'
+        },
+        status: 400
+      });
+    }
+    
+    // Inicializar sala se não existir
     if (!rooms[room]) rooms[room] = {};
     if (!signals[room]) signals[room] = [];
     
-    rooms[room][id] = { id, name, timestamp: Date.now() };
+    // Registrar usuário na sala
+    rooms[room][id] = { 
+      id, 
+      name: name || 'Anônimo', 
+      timestamp: Date.now() 
+    };
+    
+    console.log(`Usuário ${id} entrou na sala ${room}`);
     
     // Remover usuários inativos (mais de 5 minutos)
     const now = Date.now();
     for (const userId in rooms[room]) {
       if (now - rooms[room][userId].timestamp > 300000) {
+        console.log(`Removendo usuário inativo ${userId} da sala ${room}`);
         delete rooms[room][userId];
       }
     }
@@ -53,6 +75,19 @@ async function handleRequest(request) {
     const data = await request.json();
     const { sender, target, type, data: signalData } = data;
     
+    if (!sender || !target || !type) {
+      return new Response(JSON.stringify({ 
+        success: false, 
+        error: 'Parâmetros inválidos' 
+      }), {
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json'
+        },
+        status: 400
+      });
+    }
+    
     // Encontrar a sala certa
     let roomName = null;
     for (const room in rooms) {
@@ -62,25 +97,45 @@ async function handleRequest(request) {
       }
     }
     
-    if (roomName) {
-      // Armazenar o sinal para ser recuperado depois
-      if (!signals[roomName]) signals[roomName] = [];
-      
-      signals[roomName].push({
-        sender,
-        target,
-        type,
-        data: signalData,
-        timestamp: Date.now()
+    if (!roomName) {
+      return new Response(JSON.stringify({ 
+        success: false, 
+        error: 'Sala não encontrada' 
+      }), {
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json'
+        },
+        status: 404
       });
-      
-      // Limitar número de sinais armazenados
-      if (signals[roomName].length > 100) {
-        signals[roomName] = signals[roomName].slice(-100);
-      }
     }
     
-    return new Response(JSON.stringify({ success: true }), {
+    console.log(`Sinal ${type} de ${sender} para ${target} na sala ${roomName}`);
+    
+    // Armazenar o sinal para ser recuperado depois
+    if (!signals[roomName]) signals[roomName] = [];
+    
+    // Adicionar ID único para evitar duplicatas
+    const signalId = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+    
+    signals[roomName].push({
+      id: signalId,
+      sender,
+      target,
+      type,
+      data: signalData,
+      timestamp: Date.now()
+    });
+    
+    // Limitar número de sinais armazenados
+    if (signals[roomName].length > 100) {
+      signals[roomName] = signals[roomName].slice(-100);
+    }
+    
+    return new Response(JSON.stringify({ 
+      success: true,
+      signalId
+    }), {
       headers: {
         ...headers,
         'Content-Type': 'application/json'
@@ -94,17 +149,58 @@ async function handleRequest(request) {
     const userId = url.searchParams.get('id');
     const lastTimestamp = parseInt(url.searchParams.get('last') || '0');
     
-    // Marcar como ativo
-    if (rooms[roomName] && rooms[roomName][userId]) {
-      rooms[roomName][userId].timestamp = Date.now();
+    if (!roomName || !userId) {
+      return new Response(JSON.stringify({ 
+        success: false, 
+        error: 'Parâmetros inválidos' 
+      }), {
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json'
+        },
+        status: 400
+      });
     }
     
-    // Buscar sinais pendentes para este usuário com TTL maior (2 minutos)
+    // Verificar se a sala existe
+    if (!rooms[roomName]) {
+      return new Response(JSON.stringify({ 
+        success: false, 
+        error: 'Sala não encontrada' 
+      }), {
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json'
+        },
+        status: 404
+      });
+    }
+    
+    // Marcar como ativo
+    if (rooms[roomName][userId]) {
+      rooms[roomName][userId].timestamp = Date.now();
+    } else {
+      // Se o usuário não está na sala, mas está tentando fazer polling
+      // podemos adicioná-lo à sala como potencial reconexão
+      console.log(`Usuário ${userId} reconectado à sala ${roomName}`);
+      rooms[roomName][userId] = { 
+        id: userId, 
+        name: 'Reconectado', 
+        timestamp: Date.now() 
+      };
+    }
+    
+    // Filtrar sinais vencidos (mais de 2 minutos)
+    const now = Date.now();
+    if (signals[roomName]) {
+      signals[roomName] = signals[roomName].filter(
+        signal => now - signal.timestamp < 120000
+      );
+    }
+    
+    // Buscar sinais pendentes para este usuário
     const pendingSignals = [];
     if (signals[roomName]) {
-      const now = Date.now();
-      signals[roomName] = signals[roomName].filter(signal => now - signal.timestamp < 120000); // 2 minutos TTL
-      
       signals[roomName].forEach(signal => {
         if (signal.target === userId && signal.timestamp > lastTimestamp) {
           pendingSignals.push(signal);
@@ -112,13 +208,20 @@ async function handleRequest(request) {
       });
     }
     
-    // Debug: mostrar contagem de sinais e usuários
-    console.log(`Poll: sala=${roomName}, usuário=${userId}, sinais=${pendingSignals.length}, usuários=${rooms[roomName] ? Object.keys(rooms[roomName]).length : 0}`);
+    // Remover usuários inativos (mais de 2 minutos)
+    for (const otherUserId in rooms[roomName]) {
+      if (now - rooms[roomName][otherUserId].timestamp > 120000) {
+        console.log(`Removendo usuário inativo ${otherUserId} da sala ${roomName}`);
+        delete rooms[roomName][otherUserId];
+      }
+    }
+    
+    console.log(`Poll de ${userId}: sala=${roomName}, ${pendingSignals.length} sinais, ${Object.keys(rooms[roomName]).length} usuários`);
     
     return new Response(JSON.stringify({
       success: true,
       signals: pendingSignals,
-      users: rooms[roomName] ? Object.values(rooms[roomName]) : []
+      users: Object.values(rooms[roomName])
     }), {
       headers: {
         ...headers,
@@ -127,5 +230,37 @@ async function handleRequest(request) {
     });
   }
   
-  return new Response('Not Found', { status: 404, headers });
+  // Adicionar endpoint para verificação de status
+  if (url.pathname === '/status') {
+    const stats = {
+      rooms: Object.keys(rooms).length,
+      totalUsers: 0,
+      totalSignals: 0
+    };
+    
+    for (const room in rooms) {
+      stats.totalUsers += Object.keys(rooms[room]).length;
+    }
+    
+    for (const room in signals) {
+      stats.totalSignals += signals[room].length;
+    }
+    
+    return new Response(JSON.stringify({
+      success: true,
+      status: "online",
+      stats,
+      timestamp: new Date().toISOString()
+    }), {
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json'
+      }
+    });
+  }
+  
+  return new Response('Not Found', { 
+    status: 404, 
+    headers 
+  });
 }

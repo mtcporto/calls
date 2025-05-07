@@ -1,6 +1,7 @@
-import { connectToRoom, addStreamToVideoElement, disconnect, getDebugInfo, updateMediaStatus } from './webrtc.js';
+// Importar módulos do WebRTC de forma correta
+import * as WebRTC from './webrtc.js';
 
-// Adicione isso no topo do arquivo para verificar importações
+const { connectToRoom, addStreamToVideoElement, disconnect, getDebugInfo, updateMediaStatus } = WebRTC;
 
 console.log('Calls.js carregado');
 
@@ -162,9 +163,15 @@ function createVideoContainer(id, name, stream) {
 // Alternar vídeo principal
 function toggleMainVideo(id) {
   const container = document.getElementById(`container-${id}`);
+  if (!container) {
+    console.error(`Container para ${id} não encontrado`);
+    return;
+  }
   
   // Se este container já está no main, não fazer nada
   if (container.parentElement === mainVideoContainer) return;
+  
+  console.log(`Alternando vídeo principal para ${id}`);
   
   // Recuperar o container que está no main atualmente
   const mainVideo = mainVideoContainer.querySelector('.video-container');
@@ -175,6 +182,11 @@ function toggleMainVideo(id) {
     pipContainer.appendChild(mainVideo);
     mainVideo.classList.remove('main-video');
     mainVideo.classList.add('pip-video');
+    
+    // Se o vídeo que estava como principal era o falante ativo, atualizar essa informação
+    if (mainVideo.id === `container-${activeSpeakerId}`) {
+      mainVideo.classList.remove('speaker-active');
+    }
   }
   
   // Mover o container clicado para o main
@@ -183,11 +195,27 @@ function toggleMainVideo(id) {
   container.classList.remove('pip-video');
   container.classList.add('main-video');
   
+  // Atualizar o falante ativo
   activeSpeakerId = id;
+  
+  // Atualizar visualização do vídeo para melhor ajuste
+  const video = container.querySelector('video');
+  if (video) {
+    // Forçar recálculo de dimensões para melhor visualização
+    setTimeout(() => {
+      video.style.height = '';
+      video.style.width = '';
+    }, 50);
+  }
+  
+  // Disparar evento customizado de troca de vídeo principal
+  const event = new CustomEvent('main-video-changed', { 
+    detail: { id: id } 
+  });
+  window.dispatchEvent(event);
 }
 
 // Modificar a função handleRemoteStream para garantir que os vídeos PIP sejam exibidos corretamente
-
 function handleRemoteStream(stream, userId, userName) {
   console.log('Handle remote stream called for', userId);
   
@@ -196,14 +224,13 @@ function handleRemoteStream(stream, userId, userName) {
   if (existingContainer) {
     const video = document.getElementById(`video-${userId}`);
     if (video) {
-      video.srcObject = stream;
-      video.play().catch(e => console.log('Erro ao reproduzir vídeo:', e));
+      addStreamToVideoElement(stream, video, userId);
     }
     return;
   }
   
   // Criar novo container de vídeo
-  const container = createVideoContainer(userId, userName, stream);
+  const container = createVideoContainer(userId, userName || 'Participante', stream);
   
   // Garantir que o pipContainer exista
   if (!pipContainer) {
@@ -219,14 +246,20 @@ function handleRemoteStream(stream, userId, userName) {
   // Adicionar ao PIP ou como vídeo principal
   if (mainVideoContainer.querySelector('.video-container')) {
     pipContainer.appendChild(container);
+    container.classList.add('pip-video');
   } else {
     mainVideoContainer.appendChild(container);
+    container.classList.add('main-video');
+    activeSpeakerId = userId;
   }
   
-  // Forçar reprodução do vídeo
+  // Usar a função de addStreamToVideoElement para garantir reprodução
   const video = document.getElementById(`video-${userId}`);
   if (video) {
-    video.play().catch(e => console.log('Erro ao reproduzir vídeo remoto:', e));
+    addStreamToVideoElement(stream, video, userId);
+    
+    // Detectar áudio do participante para active speaker
+    detectAudioActivity(stream, userId);
   }
 }
 
@@ -518,7 +551,7 @@ toggleVideoButton.addEventListener('click', () => {
 
 leaveButton.addEventListener('click', () => {
   disconnect();
-  window.location.href = '/calls/';
+  window.location.href = 'index.html';
 });
 
 // Mostrar/ocultar menus de configurações
@@ -607,13 +640,33 @@ document.getElementById('debug-button').addEventListener('click', () => {
 // Garantir que o evento DOMContentLoaded seja disparado antes de inicializar
 document.addEventListener('DOMContentLoaded', () => {
   console.log('DOM carregado, verificando elementos críticos:');
+  
+  // Verificar se os elementos críticos foram carregados
+  if (!toggleAudioButton || !toggleVideoButton || !mainVideoContainer || !pipContainer) {
+    console.error('Elementos críticos não encontrados!', {
+      toggleAudioButton: !!toggleAudioButton,
+      toggleVideoButton: !!toggleVideoButton,
+      mainVideoContainer: !!mainVideoContainer,
+      pipContainer: !!pipContainer
+    });
+    
+    // Tentar recarregar os elementos
+    setTimeout(() => {
+      window.location.reload();
+    }, 3000);
+    return;
+  }
+  
   console.log('- toggleAudioButton:', toggleAudioButton ? 'OK' : 'Não encontrado');
   console.log('- toggleVideoButton:', toggleVideoButton ? 'OK' : 'Não encontrado');
   console.log('- mainVideoContainer:', mainVideoContainer ? 'OK' : 'Não encontrado');
   console.log('- pipContainer:', pipContainer ? 'OK' : 'Não encontrado');
   
   // Inicializar a aplicação
-  init();
+  init().catch(error => {
+    console.error('Erro na inicialização:', error);
+    alert(`Não foi possível inicializar a aplicação: ${error.message}`);
+  });
 });
 
 // Ouvir eventos de status de mídia remota
