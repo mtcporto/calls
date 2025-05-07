@@ -88,11 +88,24 @@ setInterval(updateClock, 60000);
 async function init() {
   try {
     // Inicializar o stream local
-    const stream = await startLocalStream();
+    const stream = await startLocalStream().catch(error => {
+      console.warn('Não foi possível acessar dispositivos de mídia:', error);
+      // Criar um stream vazio para casos onde o usuário não tem dispositivos
+      return createEmptyStreamWithPlaceholder();
+    });
     
     // Criar container para vídeo local
     localVideoContainer = createVideoContainer('local', userName + ' (Você)', stream);
     localVideoContainer.classList.add('local-video');
+    
+    if (!stream || stream.getTracks().length === 0) {
+      localVideoContainer.classList.add('video-off');
+      audioEnabled = false;
+      videoEnabled = false;
+      // Atualizar botões de controle para refletir estado
+      if (toggleAudioButton) toggleAudioButton.classList.add('disabled');
+      if (toggleVideoButton) toggleVideoButton.classList.add('disabled');
+    }
     
     // Adicionar ao container principal primeiro
     mainVideoContainer.appendChild(localVideoContainer);
@@ -108,10 +121,34 @@ async function init() {
     await updateDeviceList();
     
     // Detectar áudio do usuário local para active speaker
-    detectAudioActivity(stream, 'local');
+    if (stream && stream.getAudioTracks().length > 0) {
+      detectAudioActivity(stream, 'local');
+    }
   } catch (error) {
     console.error('Erro ao inicializar:', error);
-    alert(`Erro ao acessar câmera/microfone: ${error.message}`);
+    alert(`Não foi possível iniciar com mídia: Você entrará em modo somente visualização`);
+    
+    // Continuar sem mídia - modo somente visualização
+    const emptyStream = createEmptyStreamWithPlaceholder();
+    
+    localVideoContainer = createVideoContainer('local', userName + ' (Você)', emptyStream);
+    localVideoContainer.classList.add('local-video');
+    localVideoContainer.classList.add('video-off');
+    
+    audioEnabled = false;
+    videoEnabled = false;
+    
+    // Atualizar botões de controle
+    if (toggleAudioButton) toggleAudioButton.classList.add('disabled');
+    if (toggleVideoButton) toggleVideoButton.classList.add('disabled');
+    
+    // Adicionar ao container principal
+    mainVideoContainer.appendChild(localVideoContainer);
+    
+    // Conectar em modo somente visualização
+    await connectToRoom(roomCode, emptyStream, handleRemoteStream);
+    
+    await updateDeviceList();
   }
 }
 
@@ -265,26 +302,40 @@ function handleRemoteStream(stream, userId, userName) {
 
 // Função para iniciar stream local
 async function startLocalStream(videoDeviceId, audioDeviceId) {
-  const constraints = {
-    audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true,
-    video: videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true
-  };
-  
-  // Se já existe um stream, pare-o
-  if (localStream) {
-    localStream.getTracks().forEach(track => track.stop());
+  try {
+    // Configuração para preferir câmera frontal (especialmente em dispositivos móveis)
+    const videoConstraints = videoDeviceId ? 
+      { deviceId: { exact: videoDeviceId } } : 
+      { facingMode: { ideal: "user" }, width: { ideal: 1280 }, height: { ideal: 720 } };
+
+    const constraints = {
+      audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true,
+      video: videoConstraints
+    };
+    
+    // Se já existe um stream, pare-o
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+    }
+    
+    console.log("Solicitando acesso à mídia com constraints:", JSON.stringify(constraints));
+    
+    // Obter novo stream
+    localStream = await navigator.mediaDevices.getUserMedia(constraints);
+    console.log("Stream local obtido com sucesso:", localStream.getTracks().map(t => `${t.kind}:${t.label}`));
+    
+    // Se já temos um container de vídeo, atualizar o stream
+    const localVideo = document.getElementById('video-local');
+    if (localVideo) {
+      localVideo.srcObject = localStream;
+    }
+    
+    return localStream;
+  } catch (error) {
+    console.error("Erro ao obter mídia local:", error);
+    // Retornar null em caso de erro para tratamento adequado
+    return null;
   }
-  
-  // Obter novo stream
-  localStream = await navigator.mediaDevices.getUserMedia(constraints);
-  
-  // Se já temos um container de vídeo, atualizar o stream
-  const localVideo = document.getElementById('video-local');
-  if (localVideo) {
-    localVideo.srcObject = localStream;
-  }
-  
-  return localStream;
 }
 
 // Melhorar a lógica para priorizar headsets na função updateDeviceList()
@@ -512,8 +563,16 @@ function formatRoomCode(code) {
 
 // Event Listeners
 toggleAudioButton.addEventListener('click', () => {
+  if (!localStream) return;
+  
+  const audioTracks = localStream.getAudioTracks();
+  if (audioTracks.length === 0) {
+    alert('Microfone não disponível. Conecte um microfone para ativar o áudio.');
+    return;
+  }
+  
   audioEnabled = !audioEnabled;
-  localStream.getAudioTracks().forEach(track => track.enabled = audioEnabled);
+  audioTracks.forEach(track => track.enabled = audioEnabled);
   toggleAudioButton.innerHTML = audioEnabled ? 
     '<i class="fas fa-microphone"></i>' : 
     '<i class="fas fa-microphone-slash"></i>';
@@ -532,8 +591,16 @@ toggleAudioButton.addEventListener('click', () => {
 });
 
 toggleVideoButton.addEventListener('click', () => {
+  if (!localStream) return;
+  
+  const videoTracks = localStream.getVideoTracks();
+  if (videoTracks.length === 0) {
+    alert('Câmera não disponível. Conecte uma câmera para ativar o vídeo.');
+    return;
+  }
+  
   videoEnabled = !videoEnabled;
-  localStream.getVideoTracks().forEach(track => track.enabled = videoEnabled);
+  videoTracks.forEach(track => track.enabled = videoEnabled);
   toggleVideoButton.innerHTML = videoEnabled ? 
     '<i class="fas fa-video"></i>' : 
     '<i class="fas fa-video-slash"></i>';
@@ -699,4 +766,39 @@ window.addEventListener('video-active', (event) => {
     container.classList.remove('video-off');
   }
 });
+
+// Função para criar um stream vazio quando não há dispositivos disponíveis
+function createEmptyStreamWithPlaceholder() {
+  // Criar um canvas como fonte de vídeo placeholder
+  const canvas = document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = 480;
+  
+  // Desenhar um fundo simples com texto
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '24px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('Câmera não disponível', canvas.width/2, canvas.height/2 - 20);
+  
+  ctx.font = '16px Arial';
+  ctx.fillText('Você está no modo somente visualização', canvas.width/2, canvas.height/2 + 20);
+  
+  // Criar um stream a partir do canvas
+  let placeholderStream;
+  
+  try {
+    // Tentar criar um stream do canvas
+    placeholderStream = canvas.captureStream();
+  } catch(e) {
+    console.error('Erro ao criar stream do canvas:', e);
+    // Se falhar, retornar um MediaStream vazio
+    placeholderStream = new MediaStream();
+  }
+  
+  return placeholderStream;
+}
 
