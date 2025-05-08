@@ -36,7 +36,6 @@ window.addEventListener('error', function(event) {
 let localStream;
 let audioEnabled = true;
 let videoEnabled = true;
-const userName = localStorage.getItem('userName') || 'Anônimo';
 let activeSpeakerId = null;
 let localVideoContainer = null;
 
@@ -109,6 +108,15 @@ setInterval(updateClock, 60000);
 // Inicializar
 async function init() {
   try {
+    let currentUserName = localStorage.getItem('userName');
+    if (!currentUserName) {
+      currentUserName = prompt("Por favor, digite seu nome:", "");
+      if (!currentUserName || currentUserName.trim() === "") {
+        currentUserName = "Anônimo";
+      }
+      localStorage.setItem('userName', currentUserName);
+    }
+
     // Inicializar o stream local
     const stream = await startLocalStream().catch(error => {
       console.warn('Não foi possível acessar dispositivos de mídia:', error);
@@ -117,7 +125,7 @@ async function init() {
     });
     
     // Criar container para vídeo local
-    localVideoContainer = createVideoContainer('local', userName + ' (Você)', stream);
+    localVideoContainer = createVideoContainer('local', currentUserName + ' (Você)', stream);
     localVideoContainer.classList.add('local-video');
     
     if (!stream || stream.getTracks().length === 0) {
@@ -133,7 +141,7 @@ async function init() {
     mainVideoContainer.appendChild(localVideoContainer);
     
     // Conectar à sala WebRTC
-    const connected = await connectToRoom(roomCode, stream, handleRemoteStream);
+    const connected = await connectToRoom(roomCode, stream, handleRemoteStream, currentUserName);
     
     if (!connected) {
       alert('Erro ao conectar à sala. Por favor, tente novamente.');
@@ -148,12 +156,13 @@ async function init() {
     }
   } catch (error) {
     console.error('Erro ao inicializar:', error);
+    let currentUserName = localStorage.getItem('userName') || 'Anônimo'; // Garante que currentUserName seja definido no catch
     alert(`Não foi possível iniciar com mídia: Você entrará em modo somente visualização`);
     
     // Continuar sem mídia - modo somente visualização
     const emptyStream = createEmptyStreamWithPlaceholder();
     
-    localVideoContainer = createVideoContainer('local', userName + ' (Você)', emptyStream);
+    localVideoContainer = createVideoContainer('local', currentUserName + ' (Você)', emptyStream);
     localVideoContainer.classList.add('local-video');
     localVideoContainer.classList.add('video-off');
     
@@ -168,7 +177,7 @@ async function init() {
     mainVideoContainer.appendChild(localVideoContainer);
     
     // Conectar em modo somente visualização
-    await connectToRoom(roomCode, emptyStream, handleRemoteStream);
+    await connectToRoom(roomCode, emptyStream, handleRemoteStream, currentUserName);
     
     await updateDeviceList();
   }
@@ -357,15 +366,14 @@ async function startLocalStream(videoDeviceId, audioDeviceId) {
   try {
     // Configuração para forçar o uso da câmera frontal em dispositivos móveis
     let videoConstraints;
-    
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
     if (videoDeviceId) {
       // Se um deviceId específico foi fornecido, use-o
       videoConstraints = { deviceId: { exact: videoDeviceId } };
     } else {
       // Em dispositivos móveis, forçar o uso da câmera frontal
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      
-      if (isMobile) {
+      if (isMobileDevice) {
         videoConstraints = { 
           facingMode: { exact: "user" }, // Força câmera frontal
           width: { ideal: 1280 },
@@ -399,6 +407,15 @@ async function startLocalStream(videoDeviceId, audioDeviceId) {
     localStream = await navigator.mediaDevices.getUserMedia(constraints);
     console.log("Stream local obtido com sucesso:", localStream.getTracks().map(t => `${t.kind}:${t.label}`));
     
+    const videoTrack = localStream.getVideoTracks()[0];
+    if (videoTrack && isMobileDevice) {
+        const settings = videoTrack.getSettings();
+        console.log("Configurações da track de vídeo no celular:", settings);
+        if (settings.facingMode && settings.facingMode !== 'user') {
+            console.warn(`Câmera frontal pode não ter sido selecionada no celular. Modo atual: ${settings.facingMode}.`);
+        }
+    }
+
     // Se já temos um container de vídeo, atualizar o stream
     const localVideo = document.getElementById('video-local');
     if (localVideo) {
@@ -429,6 +446,15 @@ async function startLocalStream(videoDeviceId, audioDeviceId) {
         console.log("Stream local obtido com configurações flexíveis:", 
                    localStream.getTracks().map(t => `${t.kind}:${t.label}`));
         
+        const videoTrackFallback = localStream.getVideoTracks()[0];
+        if (videoTrackFallback && isMobileDevice) {
+            const settingsFallback = videoTrackFallback.getSettings();
+            console.log("Configurações da track de vídeo (fallback) no celular:", settingsFallback);
+            if (settingsFallback.facingMode && settingsFallback.facingMode !== 'user') {
+                console.warn(`Câmera frontal (fallback) pode não ter sido selecionada no celular. Modo atual: ${settingsFallback.facingMode}.`);
+            }
+        }
+
         const localVideo = document.getElementById('video-local');
         if (localVideo) {
           localVideo.srcObject = localStream;
@@ -936,21 +962,18 @@ window.addEventListener('DOMContentLoaded', () => {
     document.documentElement.classList.toggle('mobile', isMobile);
     
     if (pipContainer) {
-      // Em dispositivos móveis, mostrar apenas o primeiro PIP
+      const pips = pipContainer.querySelectorAll('.video-container');
       if (isMobile) {
-        const pips = pipContainer.querySelectorAll('.video-container');
-        if (pips.length > 1) {
-          Array.from(pips).forEach((pip, index) => {
-            if (index > 0) {
-              pip.style.display = 'none';
-            } else {
-              pip.style.display = 'block';
+        // Em dispositivos móveis, mostrar apenas o primeiro PIP
+        pips.forEach((pip, index) => {
+            // O primeiro PIP (index 0) deve ser 'block', os demais 'none'
+            // A menos que não haja PIPs, ou apenas um.
+            if (pips.length > 0) {
+                 pip.style.display = (index === 0) ? 'block' : 'none';
             }
-          });
-        }
+        });
       } else {
         // Em desktop, mostrar todos os PIPs
-        const pips = pipContainer.querySelectorAll('.video-container');
         pips.forEach(pip => {
           pip.style.display = 'block';
         });
