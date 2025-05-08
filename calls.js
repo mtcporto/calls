@@ -65,46 +65,57 @@ const MAX_VISIBLE_PIPS_DESKTOP = 4; // Máximo de PIPs visíveis em desktop
 function handleResize() {
   const isMobile = window.innerWidth <= 768;
   const pipVideos = pipContainer.querySelectorAll('.video-container');
-
+  
+  // Importante: garantir que o elemento pipContainer exista e seja visível
+  if (!pipContainer) {
+    console.error("PIP Container não encontrado!");
+    return;
+  }
+  
+  // Forçar o display do pipContainer para flex
+  pipContainer.style.display = 'flex';
+  
   if (isMobile) {
-    // Em mobile, mostrar apenas o vídeo principal, ocultar todos os PIPs
-    pipContainer.style.display = 'none';
-    mainVideoContainer.style.flexGrow = '1'; // Ocupar todo o espaço
-    pipVideos.forEach(pip => {
-      pip.style.display = 'none';
-    });
-    // Garantir que o vídeo principal esteja visível e ajustado
-    const mainVideo = mainVideoContainer.querySelector('.video-container video');
-    if (mainVideo) {
-        mainVideo.style.objectFit = 'contain';
-    }
-
-  } else {
-    // Em desktop, mostrar PIPs e ajustar layout
-    pipContainer.style.display = 'flex'; // Usar flex para organizar PIPs
-    mainVideoContainer.style.flexGrow = '3'; // Dar mais espaço ao vídeo principal
-    let visiblePips = 0;
-    pipVideos.forEach(pip => {
-      if (visiblePips < MAX_VISIBLE_PIPS_DESKTOP) {
-        pip.style.display = 'flex'; // Usar flex para o container do PIP
-        visiblePips++;
+    // Em mobile, posicionar PIP sobre o vídeo principal
+    pipContainer.style.position = 'absolute';
+    pipContainer.style.bottom = '80px';
+    pipContainer.style.right = '10px';
+    pipContainer.style.width = '100px'; // Tamanho menor para mobile
+    pipContainer.style.maxHeight = '140px'; // Controlar altura em mobile
+    
+    // Em mobile, mostrar apenas o primeiro PIP
+    pipVideos.forEach((pip, index) => {
+      if (index === 0) {
+        pip.style.display = 'block';
       } else {
         pip.style.display = 'none';
       }
     });
-    // Ajustar o vídeo principal e os PIPs
-    const mainVideo = mainVideoContainer.querySelector('.video-container video');
-    if (mainVideo) {
-        mainVideo.style.objectFit = 'contain';
-    }
-    pipVideos.forEach(pip => {
-        const video = pip.querySelector('video');
-        if (video) {
-            video.style.objectFit = 'cover'; // PIPs podem usar cover
-        }
+    
+  } else {
+    // Em desktop, posicionar como coluna na lateral
+    pipContainer.style.position = 'absolute';
+    pipContainer.style.top = '70px';
+    pipContainer.style.right = '10px';
+    pipContainer.style.width = '160px'; // Largura padrão dos PIPs em desktop
+    pipContainer.style.maxHeight = 'calc(100vh - 160px)';
+    pipContainer.style.flexDirection = 'column';
+    
+    // Em desktop, mostrar até MAX_VISIBLE_PIPS_DESKTOP PIPs
+    pipVideos.forEach((pip, index) => {
+      if (index < MAX_VISIBLE_PIPS_DESKTOP) {
+        pip.style.display = 'block';
+        pip.style.width = '100%';
+        pip.style.height = 'auto';
+        pip.style.aspectRatio = '16/9';
+        pip.style.marginBottom = '10px';
+      } else {
+        pip.style.display = 'none';
+      }
     });
   }
-  console.log(`Desktop: Garantindo que todos os ${pipVideos.length} PIPs estejam visíveis (máx ${MAX_VISIBLE_PIPS_DESKTOP} em desktop, mobile: ${isMobile}).`);
+  
+  console.log(`PIP: Garantindo que todos os ${pipVideos.length} PIPs estejam visíveis (máx ${MAX_VISIBLE_PIPS_DESKTOP} em desktop, mobile: ${isMobile}). pipContainer display: ${pipContainer.style.display}`);
 }
 
 // Obter código da sala a partir da URL
@@ -360,36 +371,61 @@ function handleRemoteStream(stream, userId, userName) {
   
   if (!pipContainer) {
     console.error('Elemento pip-container não encontrado!');
-    // Não tentar recriar aqui, pois deve existir desde o HTML.
-    // Se não existir, é um erro de carregamento do DOM.
-    return; 
+    // Tentar criar o pipContainer se ele não existir
+    const videoArea = document.querySelector('.video-area');
+    if (videoArea) {
+      const newPipContainer = document.createElement('div');
+      newPipContainer.id = 'pip-container';
+      newPipContainer.className = 'pip-container';
+      videoArea.appendChild(newPipContainer);
+      pipContainer = newPipContainer;
+      console.log("Criado novo pip-container no handleRemoteStream");
+    } else {
+      return; // Não conseguiu encontrar nem criar o container
+    }
   }
   
-  const isMobile = window.innerWidth <= 768;
+  // Verificar se existe um vídeo principal já
+  const mainVideoExists = mainVideoContainer.querySelector('.video-container');
   
-  if (mainVideoContainer.querySelector('.video-container')) {
+  if (mainVideoExists) {
+    // Se já existe um vídeo principal, adicionar este como PIP
     pipContainer.appendChild(container);
     container.classList.add('pip-video');
-    console.log(`Adicionado ${userId} ao pipContainer.`);
+    console.log(`Adicionado ${userId} ao pipContainer como PIP.`);
   } else {
+    // Se não existe vídeo principal, este se torna o principal
     mainVideoContainer.appendChild(container);
     container.classList.add('main-video');
     activeSpeakerId = userId;
-    console.log(`Adicionado ${userId} ao mainVideoContainer como principal.`);
+    console.log(`Adicionado ${userId} ao mainVideoContainer como vídeo principal.`);
   }
   
-  // Aplicar lógica de visibilidade de PIPs (especialmente após adicionar um novo)
-  handleResize(); // Chamar handleResize para aplicar a lógica de exibição correta
-
+  // Aplicar lógica de visibilidade de PIPs
+  container.style.display = 'block'; // Garantir que o container esteja visível
+  handleResize(); // Recalcular layout para mostrar corretamente os PIPs
+  
+  // Adicionar o stream ao elemento de vídeo e configurar eventos de áudio
   const video = document.getElementById(`video-${userId}`);
   if (video) {
-    const videoContainerElement = document.getElementById(`container-${userId}`);
-    if (videoContainerElement && window.getComputedStyle(videoContainerElement).display === 'none') {
-        console.warn(`Container para ${userId} está com display:none antes de adicionar stream. Verificando lógica de handleResize.`);
-        // A lógica de display já deve ser tratada por handleResize
-    }
     addStreamToVideoElement(stream, video, userId);
-    detectAudioActivity(stream, userId);
+    
+    // Configurar detecção de áudio para active speaker
+    if (stream && stream.getAudioTracks().length > 0) {
+      detectAudioActivity(stream, userId);
+    }
+    
+    // Disparar evento para indicar que o vídeo está ativo
+    const videoActiveEvent = new CustomEvent('video-active', {
+      detail: { peerId: userId }
+    });
+    window.dispatchEvent(videoActiveEvent);
+    
+    // Remover classe video-off se o vídeo tem tracks de vídeo ativos
+    if (stream && stream.getVideoTracks().length > 0 && stream.getVideoTracks()[0].enabled) {
+      container.classList.remove('video-off');
+      container.classList.add('video-active');
+    }
   } else {
     console.error(`Elemento de vídeo video-${userId} não encontrado após criar container.`);
   }
@@ -1023,4 +1059,59 @@ window.addEventListener('DOMContentLoaded', () => {
   handleResize();
   window.addEventListener('resize', handleResize);
 });
+
+// Adicionar inicialização específica para o container PIP após o DOMContentLoaded
+(function ensurePipVisibility() {
+  // Esta função auto-executável irá garantir que o container PIP exista e seja visível
+  
+  // Função que tentará tornar os PIPs visíveis
+  function makePipsVisible() {
+    console.log("Verificando visibilidade dos PIPs...");
+    
+    // Se o pipContainer não existe ou está oculto, corrigir isso
+    if (!pipContainer) {
+      console.log("PIP Container não encontrado, tentando obter novamente");
+      pipContainer = document.getElementById('pip-container');
+    }
+    
+    if (pipContainer) {
+      // Forçar display flex
+      pipContainer.style.display = 'flex';
+      
+      // Garantir que seja visível
+      pipContainer.style.opacity = '1';
+      pipContainer.style.visibility = 'visible';
+      
+      // Aplicar z-index alto para garantir que esteja acima
+      pipContainer.style.zIndex = '100';
+      
+      const pipVideos = pipContainer.querySelectorAll('.video-container');
+      console.log(`Encontrados ${pipVideos.length} vídeos em PIP`);
+      
+      // Verificar cada vídeo PIP individualmente
+      pipVideos.forEach((pip, i) => {
+        pip.style.display = 'block';
+        pip.style.opacity = '1';
+        pip.style.visibility = 'visible';
+        console.log(`PIP ${i} está visível: ${window.getComputedStyle(pip).display !== 'none'}`);
+      });
+      
+      // Chamar handleResize para aplicar a lógica adequada ao tamanho da tela
+      if (typeof handleResize === 'function') {
+        handleResize();
+      }
+    }
+  }
+  
+  // Tentar várias vezes para garantir que os PIPs fiquem visíveis
+  // mesmo após mudanças no DOM ou carregamento atrasado
+  setTimeout(makePipsVisible, 1000);
+  setTimeout(makePipsVisible, 3000);
+  
+  // Também verificar quando um novo vídeo for adicionado
+  window.addEventListener('video-active', makePipsVisible);
+  
+  // E quando a janela for redimensionada
+  window.addEventListener('resize', makePipsVisible);
+})();
 

@@ -331,18 +331,23 @@ body.login-page {
 
 /* PIP Container */
 .pip-container {
-  display: flex;
+  display: flex !important; /* Forçar display flex sempre */
   flex-direction: column;
   gap: 8px; /* Espaçamento entre PIPs */
-  z-index: 10; /* Abaixo dos controles, mas acima do vídeo principal se sobreposto */
+  z-index: 10;
   pointer-events: auto;
-  /* Estilos base para desktop, serão sobrescritos em mobile */
-  position: relative; /* Para layout flex em desktop */
-  width: var(--pip-width-desktop);
+  position: absolute !important; /* Posicionamento absoluto para sobrepor ao vídeo principal */
+  top: 70px;
+  right: 10px;
+  width: var(--pip-width-desktop); 
+  max-height: calc(100vh - 160px);
+  background-color: rgba(0,0,0,0.3);
   padding: 8px;
-  background-color: rgba(0,0,0,0.1);
-  max-height: calc(100vh - 140px); /* header + controls */
   overflow-y: auto;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+  border-radius: 8px;
+  opacity: 1 !important;
+  visibility: visible !important;
 }
 
 .pip-container .video-container {
@@ -354,6 +359,9 @@ body.login-page {
   flex-shrink: 0; 
   border: 1px solid var(--border-color);
   transition: transform 0.2s, border-color 0.2s;
+  display: block !important; /* Forçar display block para PIPs */
+  opacity: 1 !important;
+  visibility: visible !important;
 }
 
 .pip-container .video-container:hover {
