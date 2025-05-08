@@ -302,11 +302,30 @@ function handleRemoteStream(stream, userId, userName) {
     pipContainer = newPipContainer;
   }
   
-  // Adicionar ao PIP ou como vídeo principal
+  // Verificar se é mobile
+  const isMobile = window.innerWidth <= 768;
+  const maxPipInMobile = 1; // Máximo de PIPs em mobile
+  
+  // Adicionar ao PIP e garantir que exista um vídeo principal
   if (mainVideoContainer.querySelector('.video-container')) {
+    // Já existe vídeo principal, adicionar ao PIP
     pipContainer.appendChild(container);
     container.classList.add('pip-video');
+    
+    // Em dispositivos móveis, limitar o número de PIPs visíveis
+    if (isMobile) {
+      const pips = pipContainer.querySelectorAll('.video-container');
+      if (pips.length > maxPipInMobile) {
+        // Tornar todos visíveis primeiro para não afetar a ordem
+        pips.forEach(pip => pip.style.display = 'block');
+        // Depois esconder os excedentes
+        Array.from(pips).slice(maxPipInMobile).forEach(pip => {
+          pip.style.display = 'none';
+        });
+      }
+    }
   } else {
+    // Não existe vídeo principal, definir este como principal
     mainVideoContainer.appendChild(container);
     container.classList.add('main-video');
     activeSpeakerId = userId;
@@ -316,6 +335,17 @@ function handleRemoteStream(stream, userId, userName) {
   const video = document.getElementById(`video-${userId}`);
   if (video) {
     addStreamToVideoElement(stream, video, userId);
+    
+    // Executar um timeout para garantir que o vídeo seja carregado e exibido
+    setTimeout(() => {
+      // Forçar a reprodução novamente
+      video.play().catch(e => {
+        console.warn('Erro ao iniciar reprodução automática após timeout:', e);
+        // Tentar usar muted para contornar restrições de autoplay
+        video.muted = true;
+        video.play().catch(e2 => console.error('Falha mesmo com muted:', e2));
+      });
+    }, 1000);
     
     // Detectar áudio do participante para active speaker
     detectAudioActivity(stream, userId);
@@ -866,4 +896,54 @@ function createEmptyStreamWithPlaceholder() {
   
   return placeholderStream;
 }
+
+// No início do arquivo, após a declaração das variáveis
+window.addEventListener('DOMContentLoaded', () => {
+  // Verificar se o container PIP existe e criá-lo caso não exista
+  if (!pipContainer) {
+    console.log("Criando container PIP na inicialização");
+    const videoArea = document.querySelector('.video-area');
+    if (videoArea) {
+      const newPipContainer = document.createElement('div');
+      newPipContainer.id = 'pip-container';
+      newPipContainer.className = 'pip-container';
+      videoArea.appendChild(newPipContainer);
+      pipContainer = newPipContainer;
+    } else {
+      console.error("Área de vídeo não encontrada para criar container PIP");
+    }
+  }
+
+  // Verificar adaptação para dispositivos móveis
+  const handleResize = () => {
+    const isMobile = window.innerWidth <= 768;
+    document.documentElement.classList.toggle('mobile', isMobile);
+    
+    if (pipContainer) {
+      // Em dispositivos móveis, mostrar apenas o primeiro PIP
+      if (isMobile) {
+        const pips = pipContainer.querySelectorAll('.video-container');
+        if (pips.length > 1) {
+          Array.from(pips).forEach((pip, index) => {
+            if (index > 0) {
+              pip.style.display = 'none';
+            } else {
+              pip.style.display = 'block';
+            }
+          });
+        }
+      } else {
+        // Em desktop, mostrar todos os PIPs
+        const pips = pipContainer.querySelectorAll('.video-container');
+        pips.forEach(pip => {
+          pip.style.display = 'block';
+        });
+      }
+    }
+  };
+
+  // Executar o ajuste inicial e adicionar listener para redimensionamento
+  handleResize();
+  window.addEventListener('resize', handleResize);
+});
 

@@ -257,15 +257,19 @@ async function sendSignal(target, type, data) {
   }
 }
 
-// Cria uma conexão peer para um usuário específico
+// Melhorar a função createPeerConnection para lidar melhor com falhas de ICE
 function createPeerConnection(peerId, peerName, initiator, addRemoteVideo) {
   console.log(`Criando conexão com peer ${peerId}${initiator ? ' (como iniciador)' : ''}`);
   
-  // Criar nova RTCPeerConnection com iceTransportPolicy forceTurn para atravessar NAT
+  // Usar configuração otimizada para melhorar a taxa de sucesso da conexão
   const pc = new RTCPeerConnection({
     ...configuration,
-    iceTransportPolicy: 'all' // tenta usar relay apenas se necesário
+    iceTransportPolicy: 'all',
+    iceCandidatePoolSize: 10,
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require'
   });
+  
   peerConnections[peerId] = pc;
   
   // Adicionar tracks locais à conexão
@@ -286,28 +290,97 @@ function createPeerConnection(peerId, peerName, initiator, addRemoteVideo) {
     }
   };
   
-  // Monitorar o estado da conexão
+  // Monitorar o estado da conexão com melhor tratamento de falhas
   pc.oniceconnectionstatechange = () => {
     console.log(`Estado ICE para ${peerId}: ${pc.iceConnectionState}`);
     
-    // Retry de conexão se falhar
+    if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+      console.log(`Conexão estabelecida com ${peerId}!`);
+      // Limpar temporizadores de retry se existirem
+      if (pc.iceRetryTimer) {
+        clearTimeout(pc.iceRetryTimer);
+        pc.iceRetryTimer = null;
+      }
+    }
+    
+    // Retry de conexão se falhar com backoff exponencial
     if (pc.iceConnectionState === 'failed') {
       console.log(`Conexão com ${peerId} falhou, tentando reiniciar ICE`);
-      pc.restartIce();
       
-      // Se for iniciador, tenta novamente a oferta
-      if (initiator) {
-        setTimeout(() => {
-          console.log(`Tentando nova oferta para ${peerId} após falha`);
-          createAndSendOffer(pc, peerId);
-        }, 2000);
+      // Número de tentativas para este peer
+      pc.iceRetryCount = (pc.iceRetryCount || 0) + 1;
+      
+      if (pc.iceRetryCount <= 5) { // Máximo de 5 tentativas
+        // Backoff exponencial: 2s, 4s, 8s, 16s, 32s
+        const delay = Math.pow(2, pc.iceRetryCount) * 1000;
+        console.log(`Tentativa ${pc.iceRetryCount} para ${peerId}, aguardando ${delay/1000}s`);
+        
+        pc.iceRetryTimer = setTimeout(() => {
+          pc.restartIce();
+          
+          // Se for iniciador, tenta novamente a oferta
+          if (initiator) {
+            console.log(`Tentando nova oferta para ${peerId} após falha`);
+            createAndSendOffer(pc, peerId);
+          }
+        }, delay);
+      } else {
+        console.warn(`Desistindo de conectar com ${peerId} após 5 tentativas`);
       }
+    }
+    
+    // Limpar recursos se desconectado completamente
+    if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'closed') {
+      if (pc.iceRetryTimer) {
+        clearTimeout(pc.iceRetryTimer);
+        pc.iceRetryTimer = null;
+      }
+      
+      // Não fechar a conexão imediatamente em disconnected, aguardar 5s
+      if (pc.iceConnectionState === 'disconnected' && !pc.disconnectTimer) {
+        pc.disconnectTimer = setTimeout(() => {
+          console.log(`Desconexão persistente de ${peerId}, fechando conexão`);
+          if (peerConnections[peerId]) {
+            pc.close();
+            delete peerConnections[peerId];
+          }
+          
+          // Não remover o elemento de vídeo automaticamente
+          // Deixar para a UI decidir o que fazer, apenas disparar evento
+          const event = new CustomEvent('peer-disconnected', {
+            detail: { peerId: peerId }
+          });
+          window.dispatchEvent(event);
+          
+        }, 5000);
+      }
+    }
+    
+    // Se reconectar, cancelar timer de desconexão
+    if (pc.disconnectTimer && 
+        (pc.iceConnectionState === 'connected' || 
+         pc.iceConnectionState === 'completed')) {
+      clearTimeout(pc.disconnectTimer);
+      pc.disconnectTimer = null;
+      console.log(`Reconectado com ${peerId}`);
     }
   };
   
   // Adicionar canal de dados para comunicação não-mídia
   if (initiator) {
     const dataChannel = pc.createDataChannel('status');
+    setupDataChannel(dataChannel, peerId);
+    pc.dataChannel = dataChannel;
+  } else {
+    pc.ondatachannel = (event) => {
+      const dataChannel = event.channel;
+      setupDataChannel(dataChannel, peerId);
+      pc.dataChannel = dataChannel;
+    };
+  }
+  
+  // Configurar o canal de dados de forma consistente
+  function setupDataChannel(dataChannel, peerId) {
     dataChannel.onopen = () => {
       console.log(`Canal de dados aberto para ${peerId}`);
       // Enviar status atual imediatamente após conexão
@@ -317,33 +390,35 @@ function createPeerConnection(peerId, peerName, initiator, addRemoteVideo) {
         video: videoStatus
       }));
     };
-    pc.dataChannel = dataChannel;
-  } else {
-    pc.ondatachannel = (event) => {
-      const dataChannel = event.channel;
-      pc.dataChannel = dataChannel;
-      
-      dataChannel.onopen = () => {
-        console.log(`Canal de dados aberto para ${peerId}`);
-        // Enviar status atual imediatamente após conexão
-        dataChannel.send(JSON.stringify({
-          type: 'media-status',
-          audio: audioStatus,
-          video: videoStatus
-        }));
-      };
-      
-      dataChannel.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'media-status') {
-            // Atualizar UI com status remoto
-            updateRemoteMediaUI(peerId, data.audio, data.video);
-          }
-        } catch (e) {
-          console.error('Erro ao processar mensagem de dados:', e);
+    
+    dataChannel.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'media-status') {
+          // Atualizar UI com status remoto
+          updateRemoteMediaUI(peerId, data.audio, data.video);
+          
+          // Disparar evento para notificar a interface sobre mudança de status
+          const statusEvent = new CustomEvent('remote-media-status', {
+            detail: {
+              peerId: peerId,
+              audio: data.audio,
+              video: data.video
+            }
+          });
+          window.dispatchEvent(statusEvent);
         }
-      };
+      } catch (e) {
+        console.error('Erro ao processar mensagem de dados:', e);
+      }
+    };
+    
+    dataChannel.onerror = (error) => {
+      console.error(`Erro no canal de dados para ${peerId}:`, error);
+    };
+    
+    dataChannel.onclose = () => {
+      console.log(`Canal de dados fechado para ${peerId}`);
     };
   }
   
@@ -356,41 +431,40 @@ function createPeerConnection(peerId, peerName, initiator, addRemoteVideo) {
     }
   };
   
-  // Lidar com estado da conexão ICE
-  pc.oniceconnectionstatechange = () => {
-    log(`Conexão ICE com ${peerId} mudou para ${pc.iceConnectionState}`);
-    
-    if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-      log(`Conexão estabelecida com ${peerId}!`);
-    }
-    
-    if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
-      log(`Conexão com ${peerId} encerrada ou falhou (${pc.iceConnectionState})`);
-      if (peerConnections[peerId]) {
-        pc.close();
-        delete peerConnections[peerId];
-        
-        // Remover elemento de vídeo
-        const videoElement = document.getElementById(`video-${peerId}`);
-        if (videoElement && videoElement.parentNode) {
-          videoElement.parentNode.remove();
-        }
-      }
-    }
-  };
-  
-  // Lidar com conexão de dados (quando estabelecida)
+  // Lidar com estado da conexão
   pc.onconnectionstatechange = () => {
     log(`Estado da conexão com ${peerId}: ${pc.connectionState}`);
+    
+    // Disparar evento de estado da conexão
+    const event = new CustomEvent('peer-connection-state', {
+      detail: { 
+        peerId: peerId,
+        state: pc.connectionState
+      }
+    });
+    window.dispatchEvent(event);
   };
   
-  // Lidar com streams remotos
+  // Melhorar tratamento de streams remotos
   pc.ontrack = event => {
-    console.log(`[WebRTC ${new Date().toLocaleTimeString()}] Recebeu track de ${peerId}`);
+    console.log(`[WebRTC ${new Date().toLocaleTimeString()}] Recebeu track de ${peerId}: ${event.track.kind}`);
+    
+    // Verificar se já temos o stream para este peer
+    const existingStream = pc.remoteStreams ? pc.remoteStreams[event.streams[0]?.id] : null;
+    
+    if (existingStream) {
+      console.log(`Stream já registrado para ${peerId}, atualizando`);
+      return;
+    }
+    
     if (!event.streams || !event.streams[0]) {
       console.log(`[WebRTC ${new Date().toLocaleTimeString()}] Recebeu track sem stream associado, criando stream manualmente`);
       // Criar um novo stream se não houver um associado à track
       const syntheticStream = new MediaStream([event.track]);
+      
+      // Armazenar referência ao stream
+      if (!pc.remoteStreams) pc.remoteStreams = {};
+      pc.remoteStreams[event.track.id] = syntheticStream;
       
       // Chamar a função de callback para adicionar vídeo com o stream sintético
       if (addRemoteVideo && typeof addRemoteVideo === 'function') {
@@ -402,10 +476,19 @@ function createPeerConnection(peerId, peerName, initiator, addRemoteVideo) {
     const remoteStream = event.streams[0];
     console.log(`[WebRTC ${new Date().toLocaleTimeString()}] Processando stream remoto de ${peerId}`);
     
+    // Armazenar referência ao stream
+    if (!pc.remoteStreams) pc.remoteStreams = {};
+    pc.remoteStreams[remoteStream.id] = remoteStream;
+    
     // Chamar a função de callback para adicionar vídeo
     if (addRemoteVideo && typeof addRemoteVideo === 'function') {
       addRemoteVideo(remoteStream, peerId, peerName);
     }
+    
+    // Monitorar quando tracks são removidas
+    event.track.onended = () => {
+      console.log(`Track ${event.track.kind} terminada de ${peerId}`);
+    };
   };
   
   // Se for o iniciador, criar e enviar oferta (com pequeno atraso)
@@ -451,22 +534,41 @@ export function disconnect() {
   log("Desconectado");
 }
 
-// Adicionar função para garantir que o vídeo remoto seja exibido
-function ensureVideoIsVisible(videoElement, peerId) {
-  // Verificar periodicamente se o vídeo está realmente reproduzindo
+// Substituir a função ensureVideoIsVisible por uma versão melhorada
+function ensureVideoIsVisible(videoElement, peerId, maxAttempts = 20) {
   let attempts = 0;
   const checkInterval = setInterval(() => {
-    if (attempts > 10) {
+    if (attempts > maxAttempts) {
+      console.warn(`Desistindo de verificar vídeo para ${peerId} após ${maxAttempts} tentativas`);
       clearInterval(checkInterval);
       return;
     }
     attempts++;
     
-    if (videoElement.paused || videoElement.videoWidth === 0) {
-      console.log(`Tentativa ${attempts} de reproduzir vídeo do peer ${peerId}`);
-      videoElement.play().catch(e => console.log('Erro ao forçar play:', e));
-    } else {
-      console.log(`Vídeo do peer ${peerId} está reproduzindo!`);
+    if (videoElement.paused || videoElement.videoWidth === 0 || videoElement.readyState < 3) {
+      console.log(`Tentativa ${attempts}/${maxAttempts} de reproduzir vídeo do peer ${peerId}`);
+      videoElement.play().catch(e => {
+        console.log(`Erro ao forçar play (tentativa ${attempts}):`, e);
+        
+        // Na tentativa 5, tentar forçar com mute se ainda não estiver mudo
+        if (attempts === 5 && !videoElement.muted && peerId !== 'local') {
+          console.log(`Tentando com muted para ${peerId}`);
+          videoElement.muted = true;
+        }
+        
+        // Na tentativa 10, tentar recarregar o stream
+        if (attempts === 10) {
+          console.log(`Tentando recarregar stream para ${peerId}`);
+          const stream = videoElement.srcObject;
+          videoElement.srcObject = null;
+          setTimeout(() => {
+            videoElement.srcObject = stream;
+            videoElement.play().catch(() => {});
+          }, 500);
+        }
+      });
+    } else if (videoElement.readyState >= 3 && !videoElement.paused) {
+      console.log(`Vídeo do peer ${peerId} está reproduzindo corretamente!`);
       clearInterval(checkInterval);
       
       // Disparar um evento para notificar que o vídeo está ativo
@@ -474,48 +576,96 @@ function ensureVideoIsVisible(videoElement, peerId) {
         detail: { peerId: peerId } 
       });
       window.dispatchEvent(event);
+      
+      // Se foi necessário mutar temporariamente, restaurar áudio após alguns segundos
+      if (videoElement.muted && peerId !== 'local') {
+        setTimeout(() => {
+          videoElement.muted = false;
+          console.log(`Áudio restaurado para ${peerId}`);
+        }, 3000); // Dar um tempo para que o usuário tenha interagido com a página
+      }
     }
   }, 1000);
 }
 
+// Melhorar a função addStreamToVideoElement para garantir que os vídeos sejam carregados corretamente
 export function addStreamToVideoElement(stream, videoElement, peerId) {
-  log("Adicionando stream a elemento de vídeo");
+  log("Adicionando stream a elemento de vídeo para " + peerId);
+  
+  // Certificar-se de que o stream não é nulo
+  if (!stream) {
+    console.error(`Stream inválido para ${peerId}`);
+    return;
+  }
+  
+  // Certificar-se de que o elemento de vídeo existe
+  if (!videoElement) {
+    console.error(`Elemento de vídeo não encontrado para ${peerId}`);
+    return;
+  }
+  
   videoElement.srcObject = stream;
   videoElement.autoplay = true;
   videoElement.playsInline = true;
   videoElement.muted = peerId === 'local'; // Mutar apenas o vídeo local
   
-  // Forçar play com tratamento de erro
+  // Forçar play com tratamento de erro aprimorado
   const playPromise = videoElement.play();
   
   if (playPromise !== undefined) {
     playPromise.catch(error => {
       console.warn('Erro ao reproduzir vídeo automaticamente:', error);
-      // Mostrar botão de play se autoplay falhar
-      const container = videoElement.parentElement;
-      if (container) {
-        const playButton = document.createElement('button');
-        playButton.className = 'video-play-button';
-        playButton.innerHTML = '<i class="fas fa-play"></i>';
-        playButton.onclick = () => {
-          videoElement.play()
-            .then(() => playButton.remove())
-            .catch(e => console.log('Erro ao forçar play:', e));
-        };
-        container.appendChild(playButton);
+      
+      // Se o erro for devido a restrições de autoplay, tentar novamente com muted
+      if (error.name === 'NotAllowedError' && peerId !== 'local') {
+        console.log(`Tentando autoplay com muted para ${peerId}`);
+        videoElement.muted = true;
+        
+        videoElement.play().catch(e => {
+          console.error(`Falha mesmo com muted para ${peerId}:`, e);
+          
+          // Mostrar botão de play se autoplay falhar
+          const container = videoElement.parentElement;
+          if (container && !container.querySelector('.video-play-button')) {
+            const playButton = document.createElement('button');
+            playButton.className = 'video-play-button';
+            playButton.innerHTML = '<i class="fas fa-play"></i>';
+            playButton.onclick = () => {
+              videoElement.play()
+                .then(() => {
+                  playButton.remove();
+                  // Restaurar áudio depois que o usuário interagir
+                  if (peerId !== 'local') {
+                    setTimeout(() => { videoElement.muted = false; }, 1000);
+                  }
+                })
+                .catch(e => console.log('Erro ao forçar play:', e));
+            };
+            container.appendChild(playButton);
+          }
+        });
       }
     });
   }
   
-  // Registrar evento loadedmetadata para garantir reprodução
+  // Registrar múltiplos eventos para garantir reprodução
   videoElement.addEventListener('loadedmetadata', () => {
-    videoElement.play().catch(e => console.log('Erro no loadedmetadata:', e));
+    log(`Metadata de vídeo carregada para ${peerId}`);
+    videoElement.play().catch(e => console.log(`Erro no loadedmetadata para ${peerId}:`, e));
   });
   
-  // Verificar periodicamente se o vídeo está sendo exibido corretamente
-  if (peerId !== 'local') {
-    ensureVideoIsVisible(videoElement, peerId);
-  }
+  videoElement.addEventListener('loadeddata', () => {
+    log(`Dados de vídeo carregados para ${peerId}`);
+    videoElement.play().catch(e => console.log(`Erro no loadeddata para ${peerId}:`, e));
+  });
+  
+  videoElement.addEventListener('canplay', () => {
+    log(`Vídeo pode ser reproduzido para ${peerId}`);
+    videoElement.play().catch(e => console.log(`Erro no canplay para ${peerId}:`, e));
+  });
+  
+  // Verificar periodicamente o estado do vídeo com tempo máximo maior
+  ensureVideoIsVisible(videoElement, peerId, 30); // 30 tentativas (30 segundos)
 }
 
 // Adicione esta função de exportação para debug
