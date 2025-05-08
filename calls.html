@@ -2,7 +2,10 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>WebRTC Meet</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.15.4/css/all.css">
@@ -29,6 +32,11 @@
         <div class="video-area">
             <div class="main-video-container" id="main-video-container">
                 <!-- Video principal será inserido aqui -->
+            </div>
+            
+            <!-- Participantes em miniatura - Garantimos que o PIP container sempre exista -->
+            <div class="pip-container" id="pip-container">
+                <!-- Miniaturas serão inseridas aqui -->
             </div>
             
             <!-- Controles de chamada -->
@@ -81,11 +89,6 @@
                     <i class="fas fa-phone-slash"></i>
                 </button>
             </div>
-            
-            <!-- Participantes em miniatura -->
-            <div class="pip-container" id="pip-container">
-                <!-- Miniaturas serão inseridas aqui -->
-            </div>
         </div>
     </div>
     
@@ -103,6 +106,44 @@
             <button id="close-share" class="btn btn-secondary mt-3">Fechar</button>
         </div>
     </div>
+
+    <!-- Adicionar eventos para prevenir desconexão -->
+    <script>
+        // Manter a conexão viva mesmo quando o app perde o foco
+        document.addEventListener('visibilitychange', function() {
+            // Evitar desconexão em dispositivos móveis quando a janela perde o foco
+            if (document.visibilityState === 'hidden') {
+                // Criar um wakeLock para manter a conexão em segundo plano
+                if ('wakeLock' in navigator) {
+                    navigator.wakeLock.request('screen')
+                        .then(wakeLock => {
+                            console.log('Wake Lock ativado para manter conexão');
+                            window.wakeLockObj = wakeLock;
+                        }).catch(e => console.log('Wake Lock não suportado', e));
+                }
+                
+                // Para navegadores mais antigos, usar timeout
+                if (!window.keepAliveTimer) {
+                    window.keepAliveTimer = setInterval(() => {
+                        // Pingar o servidor para manter a conexão ativa
+                        fetch('data:text/plain,keepalive')
+                            .catch(() => {});
+                    }, 15000);
+                }
+            } else {
+                // Quando a aba volta ao foco, liberar wakeLock e limpar timer
+                if (window.wakeLockObj) {
+                    window.wakeLockObj.release();
+                    window.wakeLockObj = null;
+                }
+                
+                if (window.keepAliveTimer) {
+                    clearInterval(window.keepAliveTimer);
+                    window.keepAliveTimer = null;
+                }
+            }
+        });
+    </script>
 
     <!-- Primeiro importar webrtc.js e depois calls.js -->
     <script type="module" src="webrtc.js" crossorigin="anonymous"></script>

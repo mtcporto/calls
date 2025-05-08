@@ -371,6 +371,9 @@ async function startLocalStream(videoDeviceId, audioDeviceId) {
           width: { ideal: 1280 },
           height: { ideal: 720 }
         };
+        
+        // Salvar preferência de câmera frontal para manter consistente
+        localStorage.setItem('preferFrontCamera', 'true');
       } else {
         // Em desktop, usar configurações padrão
         videoConstraints = { 
@@ -400,13 +403,21 @@ async function startLocalStream(videoDeviceId, audioDeviceId) {
     const localVideo = document.getElementById('video-local');
     if (localVideo) {
       localVideo.srcObject = localStream;
+      
+      // Garantir que o vídeo seja reproduzido
+      try {
+        await localVideo.play();
+        console.log("Playback de vídeo local iniciado");
+      } catch (e) {
+        console.warn("Erro ao iniciar playback de vídeo local:", e);
+      }
     }
     
     return localStream;
   } catch (error) {
     console.error("Erro ao obter mídia local:", error);
     // Se falhar ao tentar forçar câmera frontal, tentar novamente sem exigência tão rígida
-    if (error.name === 'OverconstrainedError' && !videoDeviceId) {
+    if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
       console.log("Tentando novamente com configurações mais flexíveis...");
       try {
         const flexibleConstraints = {
@@ -421,6 +432,11 @@ async function startLocalStream(videoDeviceId, audioDeviceId) {
         const localVideo = document.getElementById('video-local');
         if (localVideo) {
           localVideo.srcObject = localStream;
+          try {
+            await localVideo.play();
+          } catch (e) {
+            console.warn("Erro ao iniciar playback com stream flexível:", e);
+          }
         }
         
         return localStream;

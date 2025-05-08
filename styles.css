@@ -529,6 +529,35 @@ body.login-page {
   .pip-container::-webkit-scrollbar {
     display: none;
   }
+  
+  /* Posicionamento mais específico e forçado para o PIP mobile */
+  .pip-container {
+    position: absolute !important;
+    display: flex !important;
+    z-index: 100 !important; /* Aumentar z-index para garantir visibilidade */
+    bottom: 80px !important; /* Garantir posição acima dos controles */
+    right: 10px !important;
+    width: var(--pip-width-mobile) !important;
+    height: var(--pip-height-mobile) !important;
+    max-height: var(--pip-height-mobile) !important;
+    overflow: visible !important;
+    pointer-events: auto !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+  
+  .pip-container .video-container {
+    width: var(--pip-width-mobile) !important;
+    height: var(--pip-height-mobile) !important;
+    visibility: visible !important;
+    display: block !important;
+    opacity: 1 !important;
+  }
+  
+  /* Forçar o primeiro PIP a ser visível em mobile */
+  .pip-container .video-container:first-child {
+    display: block !important;
+  }
 }
 
 /* Responsividade - Desktop hover effects */
@@ -554,6 +583,29 @@ body.login-page {
   .pip-container::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.3);
     border-radius: 3px;
+  }
+  
+  .pip-container {
+    position: absolute !important;
+    top: 70px !important; 
+    right: 10px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+    z-index: 100 !important;
+    max-height: calc(100vh - 160px) !important;
+    width: var(--pip-width-desktop) !important;
+    pointer-events: auto !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+  
+  .pip-container .video-container {
+    width: var(--pip-width-desktop) !important;
+    height: var(--pip-height-desktop) !important;
+    visibility: visible !important;
+    display: block !important;
+    opacity: 1 !important;
   }
 }
 
@@ -619,4 +671,11 @@ video::-webkit-media-controls {
   width: 100%;
   font-size: 18px;
   color: var(--secondary-text-color);
+}
+
+/* Garantir que vídeos nos PIPs sejam exibidos corretamente */
+.pip-container .video-container video {
+  object-fit: cover !important;
+  width: 100% !important;
+  height: 100% !important;
 }
