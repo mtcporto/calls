@@ -49,13 +49,14 @@ let userId;
 let username;
 let isPolling = false;
 let lastPollTime = 0;
+let makingOffer = {}; // Flag para controlar ofertas em andamento por peerId
 
 // Variável para armazenar status de áudio e vídeo
 let audioStatus = true;
 let videoStatus = true;
 
 // Canal de dados para transmitir status do microfone/câmera entre participantes
-let dataChannels = {};
+// let dataChannels = {}; // Esta variável não parece ser usada globalmente, cada pc tem seu dataChannel
 
 // Log personalizado
 function log(message) {
@@ -91,20 +92,16 @@ export async function connectToRoom(room, stream, addRemoteVideo) {
     if (data.success) {
       console.log(`Conectado ao servidor de sinalização`, data);
       
-      // Conectar com os usuários existentes - MODIFICAÇÃO AQUI
-      // Ordene por ID para garantir que apenas um lado inicia
       const sortedUsers = [...data.users].sort((a, b) => a.id.localeCompare(b.id));
       
       sortedUsers.forEach(user => {
         if (user.id !== userId) {
-          // Apenas o peer com ID "menor" alfabeticamente inicia a conexão
           const shouldInitiate = userId < user.id;
           console.log(`Detectado usuário: ${user.name} (${user.id}), iniciando: ${shouldInitiate}`);
           createPeerConnection(user.id, user.name, shouldInitiate, addRemoteVideo);
         }
       });
       
-      // Começar a consultar o servidor em busca de atualizações
       startPolling(addRemoteVideo);
       
       return true;
@@ -124,7 +121,7 @@ function startPolling(addRemoteVideo) {
   
   console.log("Iniciando polling para atualizações");
   isPolling = true;
-  lastPollTime = Date.now() - 30000; // Pegue os últimos 30 segundos de sinais para garantir
+  lastPollTime = Date.now() - 30000; 
   
   async function poll() {
     if (!isPolling) return;
@@ -134,18 +131,18 @@ function startPolling(addRemoteVideo) {
       const data = await response.json();
       
       if (data.success) {
-        console.log(`Poll: ${data.users.length} usuários, ${data.signals?.length || 0} sinais`);
-        console.log("Usuários na sala:", data.users);
+        // console.log(`Poll: ${data.users.length} usuários, ${data.signals?.length || 0} sinais`);
+        // console.log("Usuários na sala:", data.users);
         
-        // Processar novos usuários
         data.users.forEach(user => {
           if (user.id !== userId && !peerConnections[user.id]) {
-            console.log(`Novo usuário: ${user.name} (${user.id})`);
-            createPeerConnection(user.id, user.name, true, addRemoteVideo);
+            console.log(`Novo usuário via poll: ${user.name} (${user.id})`);
+            // Ao encontrar novo usuário via poll, o peer com ID menor inicia
+            const shouldInitiate = userId < user.id;
+            createPeerConnection(user.id, user.name, shouldInitiate, addRemoteVideo);
           }
         });
         
-        // Processar sinais recebidos
         if (data.signals && data.signals.length > 0) {
           console.log("Sinais recebidos:", data.signals);
           data.signals.forEach(signal => {
@@ -159,87 +156,137 @@ function startPolling(addRemoteVideo) {
       console.error("Erro durante polling:", error);
     }
     
-    // Sempre agendar próximo poll, mesmo com erro
     setTimeout(poll, 2000);
   }
   
-  // Iniciar o polling
   poll();
 }
 
 // Processa sinais recebidos
 async function handleSignal(signal, addRemoteVideo) {
-  const { type, sender, data: signalData } = signal;
+  const { type, sender, data: signalData, name: senderName } = signal;
+  const localIdForLog = userId || 'local';
+
+  console.log(`[${localIdForLog}] Processando sinal ${type} de ${sender}`);
   
-  console.log(`Processando sinal ${type} de ${sender}`);
-  
-  if (!peerConnections[sender]) {
-    console.log(`Criando nova conexão para ${sender} após receber sinal`);
-    // Importante: se receber uma oferta, NÃO devemos iniciar nossa própria oferta
-    const initiator = type !== 'offer';
-    createPeerConnection(sender, null, initiator, addRemoteVideo);
+  if (!peerConnections[sender] && type === 'offer') {
+    console.log(`[${localIdForLog}] Criando nova conexão para ${sender} (${senderName || 'nome desconhecido'}) após receber oferta. Não serei o iniciador.`);
+    createPeerConnection(sender, senderName || null, false, addRemoteVideo); // Não iniciador, pois estamos respondendo a uma oferta
+  } else if (!peerConnections[sender]) {
+    // Para outros tipos de sinais (ex: answer, candidate) se a conexão não existir, pode ser um problema.
+    // No entanto, a lógica de criação de conexão no poll/join deve cobrir a maioria dos casos.
+    // Se for um candidato chegando antes da oferta, ele será armazenado.
+    console.log(`[${localIdForLog}] Conexão com ${sender} não existe ainda, mas recebido sinal ${type}. Será tratada se for candidato ou se oferta criar a conexão.`);
   }
   
   const pc = peerConnections[sender];
+  if (!pc && type !== 'candidate') { // Candidatos podem ser armazenados antes da conexão estar totalmente pronta
+    console.error(`[${localIdForLog}] Conexão com ${sender} não encontrada ao processar sinal ${type}. Sinal ignorado.`);
+    return;
+  }
   
   try {
     if (type === 'offer') {
-      console.log(`Recebeu oferta, configurando conexão remota`);
+      if (!pc) { // Garante que pc existe, especialmente se criado dentro deste if
+          console.error(`[${localIdForLog}] PC para ${sender} não foi criado a tempo para oferta. Abortando.`);
+          return;
+      }
+      console.log(`[${localIdForLog}] Recebeu oferta de ${sender}. Estado atual: ${pc.signalingState}`);
       
-      // Se já tiver uma oferta pendente, verificamos quem tem prioridade
-      if (pc.signalingState === 'have-local-offer') {
-        // Regra de desempate: ID menor alfabeticamente vence
-        if (userId < sender) {
-          console.log("Colisão de ofertas, ignorando a oferta remota (temos prioridade)");
-          return; // Ignoramos a oferta recebida
+      const offerCollision = pc.signalingState === 'have-local-offer';
+      let polite = userId > sender; // Nosso ID é maior = somos polite
+
+      if (offerCollision) {
+        if (polite) {
+          console.log(`[${localIdForLog}] Colisão de ofertas com ${sender}. Somos "polite", recuando nossa oferta.`);
+          await pc.setLocalDescription({ type: 'rollback' });
+          console.log(`[${localIdForLog}] Estado após rollback para ${sender}: ${pc.signalingState}`);
         } else {
-          console.log("Colisão de ofertas, rolando de volta nossa oferta");
-          await pc.setLocalDescription({type: "rollback"});
+          console.log(`[${localIdForLog}] Colisão de ofertas com ${sender}. Somos "impolite", ignorando oferta remota.`);
+          return; 
         }
       }
       
-      await pc.setRemoteDescription(new RTCSessionDescription(signalData));
+      if (pc.signalingState === 'stable' || pc.signalingState === 'have-remote-offer') { // A segunda condição é após rollback
+        await pc.setRemoteDescription(new RTCSessionDescription(signalData));
+        console.log(`[${localIdForLog}] Descrição remota (oferta de ${sender}) definida. Estado: ${pc.signalingState}`);
       
-      console.log("Criando resposta");
-      const answer = await pc.createAnswer();
-      console.log(`Resposta criada, definindo descrição local`);
-      await pc.setLocalDescription(answer);
+        console.log(`[${localIdForLog}] Criando resposta para ${sender}`);
+        const answer = await pc.createAnswer();
+        console.log(`[${localIdForLog}] Resposta para ${sender} criada. Estado antes de setLocalDescription(answer): ${pc.signalingState}`);
       
-      console.log(`Enviando resposta para ${sender}`);
-      sendSignal(sender, 'answer', answer);
-    } else if (type === 'answer') {
-      console.log(`Recebeu resposta, definindo descrição remota`);
-      await pc.setRemoteDescription(new RTCSessionDescription(signalData));
-    } else if (type === 'candidate') {
-      console.log(`Recebeu candidato ICE`);
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(signalData));
-      } catch (e) {
-        if (pc.remoteDescription) {
-          console.error(`Erro ao adicionar candidato ICE: ${e.message}`);
+        if (pc.signalingState === 'have-remote-offer') {
+          await pc.setLocalDescription(answer);
+          console.log(`[${localIdForLog}] Descrição local (resposta para ${sender}) definida. Estado: ${pc.signalingState}`);
+          console.log(`[${localIdForLog}] Enviando resposta para ${sender}`);
+          sendSignal(sender, 'answer', answer);
         } else {
-          console.log("Armazenando candidato ICE para mais tarde");
-          if (!pc.pendingCandidates) pc.pendingCandidates = [];
-          pc.pendingCandidates.push(signalData);
+          console.warn(`[${localIdForLog}] IMPEDIDO de setLocalDescription(answer) para ${sender}. Estado atual: ${pc.signalingState}, esperado: 'have-remote-offer'.`);
+        }
+      } else {
+        console.warn(`[${localIdForLog}] IMPEDIDO de setRemoteDescription(offer) para ${sender}. Estado atual: ${pc.signalingState}, esperado: 'stable' ou 'have-remote-offer'.`);
+      }
+
+    } else if (type === 'answer') {
+      if (!pc) {
+          console.error(`[${localIdForLog}] Conexão com ${sender} não encontrada ao processar RESPOSTA. Sinal ignorado.`);
+          return;
+      }
+      console.log(`[${localIdForLog}] Recebeu resposta de ${sender}. Estado atual: ${pc.signalingState}`);
+      if (pc.signalingState === 'have-local-offer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(signalData));
+        console.log(`[${localIdForLog}] Descrição remota (resposta de ${sender}) definida. Estado: ${pc.signalingState}`);
+      } else {
+        console.warn(`[${localIdForLog}] Resposta de ${sender} ignorada. Estado atual: ${pc.signalingState}, esperado: 'have-local-offer'.`);
+      }
+    } else if (type === 'candidate') {
+      console.log(`[${localIdForLog}] Recebeu candidato ICE de ${sender}`);
+      // Se pc não existe ainda, criamos um objeto temporário para armazenar candidatos
+      if (!peerConnections[sender]) {
+          console.log(`[${localIdForLog}] Conexão com ${sender} não existe, criando placeholder para candidatos.`);
+          peerConnections[sender] = { pendingCandidates: [] }; // Placeholder
+      }
+      const currentPC = peerConnections[sender]; // Pode ser o placeholder ou o RTCPeerConnection real
+
+      try {
+        // Se for um RTCPeerConnection real e tiver remoteDescription, ou se não tiver remoteDescription (estado inicial)
+        if (currentPC.addIceCandidate && (currentPC.remoteDescription || currentPC.signalingState === 'stable')) {
+            await currentPC.addIceCandidate(new RTCIceCandidate(signalData));
+        } else {
+          console.log(`[${localIdForLog}] Armazenando candidato ICE de ${sender} para mais tarde (estado: ${currentPC.signalingState}, remoteDesc: ${!!currentPC.remoteDescription})`);
+          if (!currentPC.pendingCandidates) currentPC.pendingCandidates = [];
+          currentPC.pendingCandidates.push(signalData);
+        }
+      } catch (e) {
+        // Não registrar erro se remoteDescription não estiver definido, pois é esperado armazenar o candidato
+        if (currentPC.remoteDescription) {
+          console.error(`[${localIdForLog}] Erro ao adicionar candidato ICE de ${sender}: ${e.message}`);
+        } else {
+          console.log(`[${localIdForLog}] Armazenando candidato ICE de ${sender} para mais tarde (após erro): ${e.message}`);
+          if (!currentPC.pendingCandidates) currentPC.pendingCandidates = [];
+          currentPC.pendingCandidates.push(signalData);
         }
       }
     }
   } catch (error) {
-    console.error(`Erro ao processar sinal ${type}: ${error.message}`);
+    console.error(`[${localIdForLog}] Erro ao processar sinal ${type} de ${sender}: ${error.message}`, error);
   }
 }
 
 // Envia um sinal para outro peer
 async function sendSignal(target, type, data) {
+  const localIdForLog = userId || 'local';
   try {
-    log(`Enviando sinal ${type} para ${target}`);
+    // log(`[${localIdForLog}] Enviando sinal ${type} para ${target}`); // Log mais detalhado já está no createAndSendOffer ou similar
     const response = await fetch(`${SIGNALING_SERVER}/signal`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
+        room: roomId, // Adicionar roomId para o worker poder rotear corretamente
         sender: userId,
+        name: username, // Enviar nome do remetente
         target,
         type,
         data
@@ -248,20 +295,24 @@ async function sendSignal(target, type, data) {
     
     const result = await response.json();
     if (result.success) {
-      log(`Sinal ${type} enviado com sucesso para ${target}`);
+      log(`[${localIdForLog}] Sinal ${type} enviado com sucesso para ${target}`);
     } else {
-      log(`Falha ao enviar sinal ${type} para ${target}`);
+      log(`[${localIdForLog}] Falha ao enviar sinal ${type} para ${target}: ${result.error || 'Erro desconhecido no servidor'}`);
     }
   } catch (error) {
-    log(`Erro ao enviar sinal ${type} para ${target}: ${error.message}`);
+    log(`[${localIdForLog}] Erro de rede ao enviar sinal ${type} para ${target}: ${error.message}`);
   }
 }
 
-// Melhorar a função createPeerConnection para lidar melhor com falhas de ICE
 function createPeerConnection(peerId, peerName, initiator, addRemoteVideo) {
-  console.log(`Criando conexão com peer ${peerId}${initiator ? ' (como iniciador)' : ''}`);
+  const localIdForLog = userId || 'local';
+  if (peerConnections[peerId] && peerConnections[peerId].signalingState) { // Verifica se é um PC real
+    console.log(`[${localIdForLog}] Conexão com ${peerId} já existe. Retornando existente.`);
+    return peerConnections[peerId];
+  }
   
-  // Usar configuração otimizada para melhorar a taxa de sucesso da conexão
+  console.log(`[${localIdForLog}] Criando conexão com peer ${peerId} (${peerName || 'sem nome'})${initiator ? ' (como iniciador)' : ''}`);
+  
   const pc = new RTCPeerConnection({
     ...configuration,
     iceTransportPolicy: 'all',
@@ -269,264 +320,276 @@ function createPeerConnection(peerId, peerName, initiator, addRemoteVideo) {
     bundlePolicy: 'max-bundle',
     rtcpMuxPolicy: 'require'
   });
+
+  // Se havia candidatos pendentes para este peerId (de um placeholder)
+  const existingPlaceholder = peerConnections[peerId];
+  if (existingPlaceholder && existingPlaceholder.pendingCandidates) {
+      pc.pendingCandidates = [...existingPlaceholder.pendingCandidates];
+  }
   
   peerConnections[peerId] = pc;
   
-  // Adicionar tracks locais à conexão
   if (localStream) {
-    console.log(`Adicionando ${localStream.getTracks().length} tracks locais à conexão`);
+    console.log(`[${localIdForLog}] Adicionando ${localStream.getTracks().length} tracks locais à conexão com ${peerId}`);
     localStream.getTracks().forEach(track => {
       pc.addTrack(track, localStream);
     });
   }
   
-  // Lidar com candidatos ICE
   pc.onicecandidate = event => {
     if (event.candidate) {
-      console.log(`Enviando candidato ICE para ${peerId}: ${event.candidate.candidate.substr(0, 50)}...`);
+      // console.log(`[${localIdForLog}] Enviando candidato ICE para ${peerId}: ${event.candidate.candidate.substr(0, 50)}...`);
       sendSignal(peerId, 'candidate', event.candidate);
     } else {
-      console.log(`Coleta de candidatos ICE para ${peerId} concluída`);
+      console.log(`[${localIdForLog}] Coleta de candidatos ICE para ${peerId} concluída`);
     }
   };
   
-  // Monitorar o estado da conexão com melhor tratamento de falhas
   pc.oniceconnectionstatechange = () => {
-    console.log(`Estado ICE para ${peerId}: ${pc.iceConnectionState}`);
+    console.log(`[${localIdForLog}] Estado ICE para ${peerId}: ${pc.iceConnectionState}`);
     
     if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-      console.log(`Conexão estabelecida com ${peerId}!`);
-      // Limpar temporizadores de retry se existirem
+      console.log(`[${localIdForLog}] Conexão ICE estabelecida com ${peerId}!`);
       if (pc.iceRetryTimer) {
         clearTimeout(pc.iceRetryTimer);
         pc.iceRetryTimer = null;
       }
-    }
-    
-    // Retry de conexão se falhar com backoff exponencial
-    if (pc.iceConnectionState === 'failed') {
-      console.log(`Conexão com ${peerId} falhou, tentando reiniciar ICE`);
-      
-      // Número de tentativas para este peer
-      pc.iceRetryCount = (pc.iceRetryCount || 0) + 1;
-      
-      if (pc.iceRetryCount <= 5) { // Máximo de 5 tentativas
-        // Backoff exponencial: 2s, 4s, 8s, 16s, 32s
-        const delay = Math.pow(2, pc.iceRetryCount) * 1000;
-        console.log(`Tentativa ${pc.iceRetryCount} para ${peerId}, aguardando ${delay/1000}s`);
-        
-        pc.iceRetryTimer = setTimeout(() => {
-          pc.restartIce();
-          
-          // Se for iniciador, tenta novamente a oferta
-          if (initiator) {
-            console.log(`Tentando nova oferta para ${peerId} após falha`);
-            createAndSendOffer(pc, peerId);
-          }
-        }, delay);
-      } else {
-        console.warn(`Desistindo de conectar com ${peerId} após 5 tentativas`);
+      // Processar candidatos pendentes agora que a conexão está mais estável
+      if (pc.pendingCandidates && pc.remoteDescription) {
+          console.log(`[${localIdForLog}] Processando ${pc.pendingCandidates.length} candidatos ICE pendentes para ${peerId}`);
+          pc.pendingCandidates.forEach(candidate => {
+              pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => console.error(`[${localIdForLog}] Erro ao adicionar candidato pendente para ${peerId}: ${e.message}`));
+          });
+          delete pc.pendingCandidates;
       }
     }
     
-    // Limpar recursos se desconectado completamente
+    if (pc.iceConnectionState === 'failed') {
+      console.log(`[${localIdForLog}] Conexão ICE com ${peerId} falhou, tentando reiniciar ICE`);
+      pc.iceRetryCount = (pc.iceRetryCount || 0) + 1;
+      
+      if (pc.iceRetryCount <= 3) { // Reduzido para 3 tentativas
+        const delay = Math.pow(2, pc.iceRetryCount) * 1000;
+        console.log(`[${localIdForLog}] Tentativa ICE ${pc.iceRetryCount} para ${peerId}, aguardando ${delay/1000}s`);
+        
+        pc.iceRetryTimer = setTimeout(async () => {
+          if (pc.signalingState === 'closed') {
+              console.log(`[${localIdForLog}] Conexão com ${peerId} já fechada, não tentando reiniciar ICE.`);
+              return;
+          }
+          pc.restartIce();
+          // Apenas o iniciador original da *relação* tenta uma nova oferta em falha de ICE.
+          // A flag 'initiator' aqui é a da criação da conexão.
+          if (initiator) { 
+            console.log(`[${localIdForLog}] Tentando nova oferta para ${peerId} após falha ICE. makingOffer: ${!!makingOffer[peerId]}, state: ${pc.signalingState}`);
+            if (makingOffer[peerId]) {
+              console.log(`[${localIdForLog}] Negociação para ${peerId} já em andamento (makingOffer=true) durante retry ICE. Não enviando nova oferta.`);
+              return;
+            }
+            if (pc.signalingState === 'stable') {
+              makingOffer[peerId] = true;
+              try {
+                await createAndSendOffer(pc, peerId);
+              } finally {
+                makingOffer[peerId] = false;
+              }
+            } else {
+              console.log(`[${localIdForLog}] Não tentando nova oferta para ${peerId} após falha ICE, estado não é stable: ${pc.signalingState}`);
+            }
+          }
+        }, delay);
+      } else {
+        console.warn(`[${localIdForLog}] Desistindo de conectar ICE com ${peerId} após ${pc.iceRetryCount} tentativas`);
+      }
+    }
+    
     if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'closed') {
       if (pc.iceRetryTimer) {
         clearTimeout(pc.iceRetryTimer);
         pc.iceRetryTimer = null;
       }
-      
-      // Não fechar a conexão imediatamente em disconnected, aguardar 5s
       if (pc.iceConnectionState === 'disconnected' && !pc.disconnectTimer) {
         pc.disconnectTimer = setTimeout(() => {
-          console.log(`Desconexão persistente de ${peerId}, fechando conexão`);
+          console.log(`[${localIdForLog}] Desconexão ICE persistente de ${peerId}, fechando conexão`);
           if (peerConnections[peerId]) {
-            pc.close();
+            pc.close(); // Isso deve mudar o signalingState para 'closed'
             delete peerConnections[peerId];
+            // Notificar UI
+            const event = new CustomEvent('peer-disconnected', { detail: { peerId: peerId } });
+            window.dispatchEvent(event);
           }
-          
-          // Não remover o elemento de vídeo automaticamente
-          // Deixar para a UI decidir o que fazer, apenas disparar evento
-          const event = new CustomEvent('peer-disconnected', {
-            detail: { peerId: peerId }
-          });
-          window.dispatchEvent(event);
-          
-        }, 5000);
+        }, 8000); // Aumentado para 8s
+      } else if (pc.iceConnectionState === 'closed') {
+          // Se já está fechado, garantir que foi removido
+          if (peerConnections[peerId]) {
+              delete peerConnections[peerId];
+              const event = new CustomEvent('peer-disconnected', { detail: { peerId: peerId } });
+              window.dispatchEvent(event);
+          }
       }
     }
     
-    // Se reconectar, cancelar timer de desconexão
-    if (pc.disconnectTimer && 
-        (pc.iceConnectionState === 'connected' || 
-         pc.iceConnectionState === 'completed')) {
+    if (pc.disconnectTimer && (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed')) {
       clearTimeout(pc.disconnectTimer);
       pc.disconnectTimer = null;
-      console.log(`Reconectado com ${peerId}`);
+      console.log(`[${localIdForLog}] Reconectado ICE com ${peerId}`);
     }
   };
   
-  // Adicionar canal de dados para comunicação não-mídia
   if (initiator) {
     const dataChannel = pc.createDataChannel('status');
-    setupDataChannel(dataChannel, peerId);
-    pc.dataChannel = dataChannel;
+    setupDataChannel(dataChannel, peerId, pc);
   } else {
     pc.ondatachannel = (event) => {
       const dataChannel = event.channel;
-      setupDataChannel(dataChannel, peerId);
-      pc.dataChannel = dataChannel;
+      setupDataChannel(dataChannel, peerId, pc);
     };
   }
   
-  // Configurar o canal de dados de forma consistente
-  function setupDataChannel(dataChannel, peerId) {
+  function setupDataChannel(dataChannel, chPeerId, ownerPC) {
+    ownerPC.dataChannel = dataChannel; // Associar ao PC
     dataChannel.onopen = () => {
-      console.log(`Canal de dados aberto para ${peerId}`);
-      // Enviar status atual imediatamente após conexão
-      dataChannel.send(JSON.stringify({
-        type: 'media-status',
-        audio: audioStatus,
-        video: videoStatus
-      }));
+      console.log(`[${localIdForLog}] Canal de dados aberto para ${chPeerId}`);
+      if (dataChannel.readyState === 'open') {
+        dataChannel.send(JSON.stringify({ type: 'media-status', audio: audioStatus, video: videoStatus }));
+      }
     };
-    
     dataChannel.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'media-status') {
-          // Atualizar UI com status remoto
-          updateRemoteMediaUI(peerId, data.audio, data.video);
-          
-          // Disparar evento para notificar a interface sobre mudança de status
-          const statusEvent = new CustomEvent('remote-media-status', {
-            detail: {
-              peerId: peerId,
-              audio: data.audio,
-              video: data.video
-            }
-          });
+          updateRemoteMediaUI(chPeerId, data.audio, data.video);
+          const statusEvent = new CustomEvent('remote-media-status', { detail: { peerId: chPeerId, audio: data.audio, video: data.video } });
           window.dispatchEvent(statusEvent);
         }
       } catch (e) {
-        console.error('Erro ao processar mensagem de dados:', e);
+        console.error(`[${localIdForLog}] Erro ao processar mensagem de dados de ${chPeerId}:`, e);
       }
     };
-    
     dataChannel.onerror = (error) => {
-      console.error(`Erro no canal de dados para ${peerId}:`, error);
+      console.error(`[${localIdForLog}] Erro no canal de dados para ${chPeerId}:`, error);
     };
-    
     dataChannel.onclose = () => {
-      console.log(`Canal de dados fechado para ${peerId}`);
+      console.log(`[${localIdForLog}] Canal de dados fechado para ${chPeerId}`);
     };
   }
   
-  // Lidar com estado da negociação
-  pc.onnegotiationneeded = () => {
-    log(`Negociação necessária para ${peerId}`);
-    if (initiator) {
-      log(`Iniciando negociação com ${peerId}`);
-      createAndSendOffer(pc, peerId);
+  pc.onnegotiationneeded = async () => {
+    const localIdForLog = userId || 'local';
+    log(`[${localIdForLog}] Negociação necessária para ${peerId}. Estado atual: ${pc.signalingState}, makingOffer: ${!!makingOffer[peerId]}`);
+    
+    if (makingOffer[peerId]) {
+      log(`[${localIdForLog}] Negociação para ${peerId} já em andamento (makingOffer[peerId]=true). Ignorando onnegotiationneeded.`);
+      return;
+    }
+
+    // Apenas se o estado for 'stable' podemos iniciar uma nova oferta.
+    // A lógica de 'initiator' original é menos relevante para renegociações;
+    // qualquer lado pode precisar renegociar (ex: ao adicionar uma track).
+    // A polidez em handleSignal resolverá colisões se ambos tentarem ao mesmo tempo.
+    if (pc.signalingState === 'stable') {
+      log(`[${localIdForLog}] Iniciando negociação com ${peerId} via onnegotiationneeded (estado stable).`);
+      makingOffer[peerId] = true;
+      try {
+        await createAndSendOffer(pc, peerId);
+      } catch (e) {
+          log(`[${localIdForLog}] Erro durante createAndSendOffer originado de onnegotiationneeded para ${peerId}: ${e.message}`);
+      } finally {
+        makingOffer[peerId] = false;
+      }
+    } else {
+      log(`[${localIdForLog}] Negociação necessária para ${peerId}, mas não iniciando oferta. Estado: ${pc.signalingState}`);
     }
   };
   
-  // Lidar com estado da conexão
   pc.onconnectionstatechange = () => {
-    log(`Estado da conexão com ${peerId}: ${pc.connectionState}`);
-    
-    // Disparar evento de estado da conexão
-    const event = new CustomEvent('peer-connection-state', {
-      detail: { 
-        peerId: peerId,
-        state: pc.connectionState
-      }
-    });
+    log(`[${localIdForLog}] Estado da conexão com ${peerId}: ${pc.connectionState}`);
+    const event = new CustomEvent('peer-connection-state', { detail: { peerId: peerId, state: pc.connectionState } });
     window.dispatchEvent(event);
+    if (pc.connectionState === 'closed' || pc.connectionState === 'failed') {
+        if (peerConnections[peerId]) {
+            pc.close();
+            delete peerConnections[peerId];
+             const disconnectEvent = new CustomEvent('peer-disconnected', { detail: { peerId: peerId } });
+            window.dispatchEvent(disconnectEvent);
+        }
+    }
   };
   
-  // Melhorar tratamento de streams remotos
   pc.ontrack = event => {
-    console.log(`[WebRTC ${new Date().toLocaleTimeString()}] Recebeu track de ${peerId}: ${event.track.kind}`);
-    
-    // Verificar se já temos o stream para este peer
-    const existingStream = pc.remoteStreams ? pc.remoteStreams[event.streams[0]?.id] : null;
-    
-    if (existingStream) {
-      console.log(`Stream já registrado para ${peerId}, atualizando`);
+    log(`[${localIdForLog}] Recebeu track de ${peerId}: ${event.track.kind}`);
+    const stream = event.streams && event.streams[0];
+    if (!stream) {
+        log(`[${localIdForLog}] Track recebida de ${peerId} sem stream associado. Criando stream sintético.`);
+        const syntheticStream = new MediaStream([event.track]);
+        if (addRemoteVideo && typeof addRemoteVideo === 'function') {
+            addRemoteVideo(syntheticStream, peerId, peerName || 'Remoto');
+        }
+        return;
+    }
+
+    // Verificar se já temos o stream para este peer (pode acontecer com renegotiation)
+    // pc.remoteStreams é um array, não um objeto. getRemoteStreams() retorna o array.
+    const existingRemoteStreams = pc.getRemoteStreams();
+    if (existingRemoteStreams.some(s => s.id === stream.id)) {
+      console.log(`[${localIdForLog}] Stream ${stream.id} de ${peerId} já registrado, não adicionando novamente.`);
       return;
     }
     
-    if (!event.streams || !event.streams[0]) {
-      console.log(`[WebRTC ${new Date().toLocaleTimeString()}] Recebeu track sem stream associado, criando stream manualmente`);
-      // Criar um novo stream se não houver um associado à track
-      const syntheticStream = new MediaStream([event.track]);
-      
-      // Armazenar referência ao stream
-      if (!pc.remoteStreams) pc.remoteStreams = {};
-      pc.remoteStreams[event.track.id] = syntheticStream;
-      
-      // Chamar a função de callback para adicionar vídeo com o stream sintético
-      if (addRemoteVideo && typeof addRemoteVideo === 'function') {
-        addRemoteVideo(syntheticStream, peerId, peerName);
-      }
-      return;
-    }
-    
-    const remoteStream = event.streams[0];
-    console.log(`[WebRTC ${new Date().toLocaleTimeString()}] Processando stream remoto de ${peerId}`);
-    
-    // Armazenar referência ao stream
-    if (!pc.remoteStreams) pc.remoteStreams = {};
-    pc.remoteStreams[remoteStream.id] = remoteStream;
-    
-    // Chamar a função de callback para adicionar vídeo
+    console.log(`[${localIdForLog}] Processando stream remoto ${stream.id} de ${peerId}`);
     if (addRemoteVideo && typeof addRemoteVideo === 'function') {
-      addRemoteVideo(remoteStream, peerId, peerName);
+      addRemoteVideo(stream, peerId, peerName || 'Remoto');
     }
-    
-    // Monitorar quando tracks são removidas
     event.track.onended = () => {
-      console.log(`Track ${event.track.kind} terminada de ${peerId}`);
+      log(`[${localIdForLog}] Track ${event.track.kind} terminada de ${peerId}`);
     };
   };
-  
-  // Se for o iniciador, criar e enviar oferta (com pequeno atraso)
-  if (initiator) {
-    setTimeout(() => {
-      log(`Iniciando oferta para ${peerId} após atraso`);
-      createAndSendOffer(pc, peerId);
-    }, 1000); // Pequeno atraso para garantir que tudo esteja configurado
-  }
   
   return pc;
 }
 
-// Cria e envia uma oferta para outro peer
 async function createAndSendOffer(pc, peerId) {
+  const localIdForLog = userId || 'local';
+  if (pc.signalingState !== 'stable') {
+    log(`[${localIdForLog}] Não criando oferta para ${peerId}, estado de sinalização é ${pc.signalingState} (não stable).`);
+    return;
+  }
   try {
-    log(`Criando oferta para ${peerId}`);
+    log(`[${localIdForLog}] Criando oferta para ${peerId}`);
     const offer = await pc.createOffer();
-    log(`Definindo descrição local para ${peerId}`);
+    
+    if (pc.signalingState !== 'stable') {
+        log(`[${localIdForLog}] Estado mudou para ${pc.signalingState} após createOffer para ${peerId}. Abortando setLocalDescription.`);
+        return;
+    }
     await pc.setLocalDescription(offer);
     
-    log(`Enviando oferta para ${peerId}`);
-    sendSignal(peerId, 'offer', offer);
+    if (pc.signalingState !== 'have-local-offer') {
+        log(`[${localIdForLog}] Estado mudou para ${pc.signalingState} após setLocalDescription para ${peerId}. Abortando envio da oferta.`);
+        return;
+    }
+    log(`[${localIdForLog}] Descrição local (oferta) definida para ${peerId}. Enviando.`);
+    sendSignal(peerId, 'offer', pc.localDescription);
   } catch (error) {
-    log(`Erro ao criar/enviar oferta para ${peerId}: ${error.message}`);
+    log(`[${localIdForLog}] Erro ao criar/enviar oferta para ${peerId}: ${error.message}`);
+    // Reset makingOffer flag if it was set by the caller, though ideally caller handles its own try/finally
+    // makingOffer[peerId] = false; // CUIDADO: Isso pode ser problemático se createAndSendOffer for chamado sem makingOffer ser gerenciado externamente.
+                                 // A flag makingOffer agora é gerenciada pelo chamador (onnegotiationneeded, retry ICE)
   }
 }
 
-// Parar conexões e limpar recursos
 export function disconnect() {
   log("Desconectando de todas as chamadas");
   isPolling = false;
   
-  // Fechar todas as conexões peer
-  Object.values(peerConnections).forEach(pc => pc.close());
+  Object.values(peerConnections).forEach(pc => {
+      if (pc && typeof pc.close === 'function') {
+          pc.close();
+      }
+  });
   peerConnections = {};
+  makingOffer = {}; // Resetar flags de oferta
   
-  // Parar todas as tracks do stream local
   if (localStream) {
     localStream.getTracks().forEach(track => track.stop());
   }
@@ -534,229 +597,162 @@ export function disconnect() {
   log("Desconectado");
 }
 
-// Substituir a função ensureVideoIsVisible por uma versão melhorada
 function ensureVideoIsVisible(video, peerId) {
   let attempts = 0;
-  const maxAttempts = 35; // Aumentar um pouco as tentativas
-  const interval = 250; // Aumentar um pouco o intervalo
+  const maxAttempts = 35; 
+  const interval = 250; 
+  const localIdForLog = userId || 'local';
 
-  log(`[WebRTC] Iniciando verificação de visibilidade para ${peerId}. Muted: ${video.muted}, Paused: ${video.paused}, ReadyState: ${video.readyState}`);
+  log(`[${localIdForLog}][VideoCheck ${peerId}] Iniciando. Muted: ${video.muted}, Paused: ${video.paused}, ReadyState: ${video.readyState}`);
 
   const checkVideo = setInterval(() => {
     attempts++;
     
     if (!document.body.contains(video)) {
-        log(`[WebRTC] Elemento de vídeo para ${peerId} não está mais no DOM. Interrompendo verificação.`, 'warn');
+        log(`[${localIdForLog}][VideoCheck ${peerId}] Elemento não está no DOM. Interrompendo.`);
         clearInterval(checkVideo);
         return;
     }
 
     const styles = window.getComputedStyle(video);
     const isElementVisible = styles.display !== 'none' && styles.visibility !== 'hidden' && video.offsetParent !== null && video.clientWidth > 0 && video.clientHeight > 0;
-    const hasVideoData = video.readyState >= 2; // HAVE_CURRENT_DATA ou superior
+    const hasVideoData = video.readyState >= 2; 
     const hasDimensions = video.videoWidth > 0 && video.videoHeight > 0;
 
-    log(`[WebRTC Tentativa ${attempts}/${maxAttempts}] Vid: ${peerId}. State: ${video.readyState}, W: ${video.videoWidth}, H: ${video.videoHeight}, Paused: ${video.paused}, VisibleDOM: ${isElementVisible}, HasData: ${hasVideoData}, HasDims: ${hasDimensions}`);
+    // log(`[${localIdForLog}][VideoCheck ${peerId} Tentativa ${attempts}/${maxAttempts}] State: ${video.readyState}, W: ${video.videoWidth}, H: ${video.videoHeight}, Paused: ${video.paused}, VisibleDOM: ${isElementVisible}, HasData: ${hasVideoData}, HasDims: ${hasDimensions}`);
 
     if (hasVideoData && hasDimensions && isElementVisible && !video.paused) {
-      log(`[WebRTC] Vídeo para ${peerId} está visível e reproduzindo.`);
+      log(`[${localIdForLog}][VideoCheck ${peerId}] Vídeo visível e reproduzindo.`);
       clearInterval(checkVideo);
       const event = new CustomEvent('video-active', { detail: { peerId: peerId } });
       window.dispatchEvent(event);
     } else if (attempts >= maxAttempts) {
-      log(`[WebRTC] Desistindo de verificar vídeo para ${peerId} após ${maxAttempts} tentativas. Estado final - State: ${video.readyState}, W: ${video.videoWidth}, H: ${video.videoHeight}, Paused: ${video.paused}, VisibleDOM: ${isElementVisible}`, 'error');
+      log(`[${localIdForLog}][VideoCheck ${peerId}] Desistindo após ${maxAttempts} tentativas. Estado final - State: ${video.readyState}, W: ${video.videoWidth}, H: ${video.videoHeight}, Paused: ${video.paused}, VisibleDOM: ${isElementVisible}`);
       clearInterval(checkVideo);
-      // Se desistiu, mas o elemento está visível e tem stream, pode ser que o 'play' não tenha funcionado
-      // ou o stream não tem vídeo.
       if (isElementVisible && video.srcObject && video.srcObject.getVideoTracks().length === 0) {
-          log(`[WebRTC] Stream para ${peerId} não contém faixas de vídeo.`, 'warn');
+          log(`[${localIdForLog}][VideoCheck ${peerId}] Stream não contém faixas de vídeo.`);
       } else if (isElementVisible && video.paused) {
-          log(`[WebRTC] Vídeo para ${peerId} permaneceu pausado.`, 'warn');
+          log(`[${localIdForLog}][VideoCheck ${peerId}] Vídeo permaneceu pausado.`);
       }
     } else if (isElementVisible && video.paused && hasVideoData) {
-        log(`[WebRTC] Vídeo para ${peerId} está visível e com dados, mas pausado. Tentando play... (Tentativa ${attempts})`);
-        video.play().catch(e => log(`[WebRTC] Erro ao tentar play em ensureVideoIsVisible para ${peerId} (tentativa ${attempts}): ${e.message}`, 'warn'));
-    } else if (isElementVisible && !hasDimensions && hasVideoData && !video.paused) {
-        log(`[WebRTC] Vídeo para ${peerId} está reproduzindo e visível, mas dimensões ainda não disponíveis. Aguardando... (Tentativa ${attempts})`);
+        log(`[${localIdForLog}][VideoCheck ${peerId}] Pausado mas com dados/visível. Tentando play... (Tentativa ${attempts})`);
+        video.play().catch(e => log(`[${localIdForLog}][VideoCheck ${peerId}] Erro ao tentar play (tentativa ${attempts}): ${e.message}`));
     }
   }, interval);
 }
 
-// Melhorar a função addStreamToVideoElement para garantir que os vídeos sejam carregados corretamente
 export function addStreamToVideoElement(stream, videoElement, peerId) {
+  const localIdForLog = userId || 'local';
   if (!stream) {
-    log(`[WebRTC] Stream nulo fornecido para ${peerId || 'vídeo desconhecido'}`, 'error');
+    log(`[${localIdForLog}] Stream nulo fornecido para ${peerId || 'vídeo desconhecido'}`);
     return;
   }
   if (!videoElement) {
-    log(`[WebRTC] Elemento de vídeo nulo fornecido para ${peerId || 'stream desconhecido'}`, 'error');
+    log(`[${localIdForLog}] Elemento de vídeo nulo para ${peerId || 'stream desconhecido'}`);
     return;
   }
 
-  log(`[WebRTC] Adicionando stream a elemento de vídeo para ${peerId}. Tracks: ${stream.getTracks().map(t => t.kind).join(', ')}`);
+  log(`[${localIdForLog}] Adicionando stream a vídeo para ${peerId}. Tracks: ${stream.getTracks().map(t => t.kind).join(', ')}`);
   
   videoElement.srcObject = stream;
   videoElement.playsInline = true;
   videoElement.autoplay = true;
 
-  // Mutar vídeos remotos para ajudar com políticas de autoplay, exceto se for o local
-  // O vídeo local já é mutado na sua criação.
-  if (peerId && peerId !== 'local') {
+  if (peerId && peerId !== 'local') { // 'local' é um ID que você pode usar para o vídeo local
     videoElement.muted = true; 
-    log(`[WebRTC] Vídeo remoto ${peerId} mutado para auxiliar autoplay.`);
+    log(`[${localIdForLog}] Vídeo remoto ${peerId} mutado para autoplay.`);
   }
 
   videoElement.play().then(() => {
-    log(`[WebRTC] Playback iniciado com sucesso para ${peerId || 'stream desconhecido'}`);
-    ensureVideoIsVisible(videoElement, peerId);
+    log(`[${localIdForLog}] Playback iniciado para ${peerId || 'stream desconhecido'}`);
+    ensureVideoIsVisible(videoElement, peerId || stream.id); // Usar stream.id se peerId não disponível
   }).catch(error => {
-    log(`[WebRTC] Erro ao tentar reproduzir vídeo para ${peerId}: ${error.message} (Name: ${error.name})`, 'error');
+    log(`[${localIdForLog}] Erro ao reproduzir vídeo para ${peerId}: ${error.message} (${error.name})`);
     if (peerId && peerId !== 'local' && !videoElement.muted) {
-        log(`[WebRTC] Tentando novamente com muted para ${peerId} após falha inicial.`);
+        log(`[${localIdForLog}] Tentando novamente com muted para ${peerId}.`);
         videoElement.muted = true;
         videoElement.play().then(() => {
-            log(`[WebRTC] Playback com muted iniciado para ${peerId}`);
-            ensureVideoIsVisible(videoElement, peerId);
+            log(`[${localIdForLog}] Playback com muted iniciado para ${peerId}`);
+            ensureVideoIsVisible(videoElement, peerId || stream.id);
         }).catch(err2 => {
-            log(`[WebRTC] Erro ao tentar reproduzir vídeo COM MUTED para ${peerId}: ${err2.message} (Name: ${err2.name})`, 'error');
+            log(`[${localIdForLog}] Erro ao reproduzir COM MUTED para ${peerId}: ${err2.message} (${err2.name})`);
         });
     } else if (error.name === 'NotAllowedError' || error.name === 'AbortError') {
-         log(`[WebRTC] Playback para ${peerId} bloqueado ou abortado. Interação do usuário pode ser necessária ou stream pode não ter vídeo.`, 'warn');
-         // Mesmo se o play falhar, ainda tentar chamar ensureVideoIsVisible, 
-         // pois o vídeo pode já estar carregando metadados.
-         ensureVideoIsVisible(videoElement, peerId);
+         log(`[${localIdForLog}] Playback para ${peerId} bloqueado/abortado. Interação do usuário pode ser necessária.`);
+         ensureVideoIsVisible(videoElement, peerId || stream.id);
     }
   });
 }
 
-// Adicione esta função de exportação para debug
 export function getDebugInfo() {
   const debugInfo = {
     connections: {},
     network: navigator.onLine,
     webRTCSupport: !!window.RTCPeerConnection,
-    mediaDevices: !!navigator.mediaDevices
+    mediaDevices: !!navigator.mediaDevices,
+    userId: userId,
+    roomId: roomId
   };
   
-  // Obtenha estado das conexões
   for (const peerId in peerConnections) {
     const pc = peerConnections[peerId];
-    debugInfo.connections[peerId] = {
-      iceConnectionState: pc.iceConnectionState,
-      connectionState: pc.connectionState,
-      signalingState: pc.signalingState,
-      iceCandidates: pc.remoteDescription ? 'Sim' : 'Não'
-    };
+    if (pc && typeof pc.signalingState !== 'undefined') { // Checar se é um PC real
+        debugInfo.connections[peerId] = {
+        iceConnectionState: pc.iceConnectionState,
+        connectionState: pc.connectionState,
+        signalingState: pc.signalingState,
+        iceGatheringState: pc.iceGatheringState,
+        localDescription: !!pc.localDescription,
+        remoteDescription: !!pc.remoteDescription,
+        dataChannelReadyState: pc.dataChannel ? pc.dataChannel.readyState : 'N/A'
+        };
+    } else {
+        debugInfo.connections[peerId] = { state: 'Placeholder ou inválido' };
+    }
   }
-  
   return debugInfo;
 }
 
-// Função para enviar estado de mídia para outros participantes
 export function updateMediaStatus(audioEnabled, videoEnabled) {
   audioStatus = audioEnabled;
   videoStatus = videoEnabled;
+  const localIdForLog = userId || 'local';
   
-  // Enviar status para todos os peers conectados
   for (const peerId in peerConnections) {
-    if (peerConnections[peerId].dataChannel && 
-        peerConnections[peerId].dataChannel.readyState === 'open') {
-      peerConnections[peerId].dataChannel.send(JSON.stringify({
-        type: 'media-status',
-        audio: audioEnabled,
-        video: videoEnabled
-      }));
+    const pc = peerConnections[peerId];
+    if (pc && pc.dataChannel && pc.dataChannel.readyState === 'open') {
+      pc.dataChannel.send(JSON.stringify({ type: 'media-status', audio: audioEnabled, video: videoEnabled }));
+    } else {
+      // log(`[${localIdForLog}] Canal de dados para ${peerId} não está aberto ou não existe para enviar media-status.`);
     }
   }
 }
 
-// Função para atualizar UI baseada no status remoto
-export function updateRemoteMediaUI(userId, audioEnabled, videoEnabled) {
-  // Atualizar ícone de microfone
-  const micStatus = document.querySelector(`#container-${userId} .mic-status`);
+export function updateRemoteMediaUI(targetUserId, audioEnabled, videoEnabled) {
+  const micStatus = document.querySelector(`#container-${targetUserId} .mic-status`);
   if (micStatus) {
-    micStatus.innerHTML = audioEnabled ? 
-      '<i class="fas fa-microphone"></i>' : 
-      '<i class="fas fa-microphone-slash"></i>';
+    micStatus.innerHTML = audioEnabled ? '<i class="fas fa-microphone"></i>' : '<i class="fas fa-microphone-slash"></i>';
     micStatus.classList.toggle('disabled', !audioEnabled);
   }
   
-  // Marcar container de vídeo como desligado se necessário
-  const container = document.getElementById(`container-${userId}`);
+  const container = document.getElementById(`container-${targetUserId}`);
   if (container) {
     container.classList.toggle('video-off', !videoEnabled);
+    const videoElement = container.querySelector('video');
+    if (videoElement) { // Se o vídeo remoto for desligado, pausar o elemento
+        if (!videoEnabled && !videoElement.paused) {
+            videoElement.pause();
+        } else if (videoEnabled && videoElement.paused) {
+            // Não tentar play() automaticamente aqui, pois pode não haver stream ou pode falhar
+            // A lógica de ensureVideoIsVisible ou um clique do usuário deve lidar com isso.
+        }
+    }
   }
 }
 
-// Modificar o handler de novos usuários para criar conexões
-function handleNewUser(user) {
-  if (user.id === myId) return; // Não conectar a si mesmo
-  
-  console.log(`Novo usuário detectado: ${user.name} (${user.id})`);
-  
-  // Iniciar conexão como initiator
-  createPeerConnection(user.id, user.name, true);
-  
-  // Criar e enviar oferta
-  const pc = peerConnections[user.id];
-  if (pc) {
-    pc.createOffer()
-      .then(offer => pc.setLocalDescription(offer))
-      .then(() => {
-        sendSignal(user.id, {
-          type: 'offer',
-          sdp: pc.localDescription
-        });
-        console.log(`Oferta enviada para ${user.name}`);
-      })
-      .catch(err => console.error('Erro ao criar oferta:', err));
-  }
-}
-
-// Garantir que o processamento de sinais esteja correto
-// Adicionar um conjunto para rastrear sinais já processados
-const processedSignals = new Set();
-
-function processSignals(signals) {
-  signals.forEach(signal => {
-    const { from, data, id } = signal;
-    
-    // Verificar se este sinal já foi processado (usando ID único)
-    const signalId = id || `${from}-${data.type}-${Date.now()}`;
-    if (processedSignals.has(signalId)) {
-      console.log(`Sinal duplicado ignorado: ${data.type} de ${from}`);
-      return;
-    }
-    
-    // Marcar sinal como processado
-    processedSignals.add(signalId);
-    
-    // Limitar tamanho do conjunto para evitar crescimento infinito
-    if (processedSignals.size > 1000) {
-      const iterator = processedSignals.values();
-      processedSignals.delete(iterator.next().value);
-    }
-    
-    console.log(`Processando sinal ${data.type} de ${from}`);
-    
-    // Resto do código de processamento existente...
-    // ...
-    
-    // Para sinais 'answer', verificar o estado atual antes de aplicar
-    if (data.type === 'answer') {
-      const pc = peerConnections[from];
-      if (pc && pc.signalingState === 'have-local-offer') {
-        // Só aplicar resposta se estivermos no estado correto
-        pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
-          .catch(err => console.error('Erro ao processar resposta:', err));
-      } else {
-        console.log(`Ignorando resposta de ${from}, estado atual: ${pc ? pc.signalingState : 'conexão não encontrada'}`);
-      }
-    }
-    
-    // ...resto do código existente...
-  });
-}
+// As funções handleNewUser e processSignals parecem ser de uma versão anterior ou lógica duplicada.
+// A lógica de criação de conexão e processamento de sinais já está em connectToRoom, startPolling e handleSignal.
+// Removendo-as para evitar confusão, a menos que sejam especificamente necessárias e ajustadas.
 
 // No final do arquivo
 export default {
