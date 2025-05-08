@@ -153,15 +153,16 @@ body.login-page {
 .video-area {
   flex-grow: 1;
   display: flex;
-  flex-direction: column; /* Garante que o main video e pip container se empilhem verticalmente se necessário */
-  position: relative; /* Necessário para o posicionamento absoluto do pip-container */
-  overflow: hidden; /* Evitar barras de rolagem inesperadas */
-  background-color: #121212; /* Cor de fundo da área de vídeo */
+  /* Em desktop, será row. Em mobile, column (padrão ou via media query) */
+  flex-direction: column; 
+  position: relative;
+  overflow: hidden;
+  background-color: #121212;
   padding-bottom: 70px; /* Espaço para os controles fixos no rodapé */
 }
 
 .main-video-container {
-  flex: 1;
+  flex-grow: 1; /* Ocupa a maior parte do espaço */
   width: 100%;
   position: relative;
   display: flex;
@@ -174,7 +175,7 @@ body.login-page {
 .main-video-container .video-container {
   height: 100%;
   width: 100%;
-  max-height: calc(100vh - 144px);
+  /* max-height removido para permitir que o flex-grow controle */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -183,54 +184,81 @@ body.login-page {
 
 .video-container {
   position: relative;
-  max-height: 100%;
-  max-width: 100%;
-  aspect-ratio: 16/9;
+  /* aspect-ratio pode ser problemático com object-fit, ajustar conforme necessário */
+  /* aspect-ratio: 16/9; */ 
   background-color: #000;
   border-radius: 8px;
   overflow: hidden;
+  display: flex; /* Para centralizar o vídeo/placeholder */
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent; /* Borda para speaker-active */
 }
 
 .video-container video {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain; /* Default para 'contain' para ver todo o vídeo */
   background-color: #1a1a1a;
-  transform: scaleX(-1);
+  transform: scaleX(-1); /* Espelhar vídeo local */
 }
 
-.video-container.video-off video {
-  opacity: 0.3;
+.main-video-container .video-container video {
+    object-fit: contain; /* Vídeo principal deve mostrar tudo */
 }
 
-.video-container.video-off::after {
-  content: '';
+.pip-container .video-container video {
+    object-fit: cover; /* PIPs podem usar cover para preencher */
+}
+
+.video-container.local-video video {
+  /* Não precisa de transform: scaleX(-1) aqui se já estiver globalmente,
+     mas pode ser específico se o global for removido. */
+}
+
+.video-placeholder {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: #1a1a1a;
-  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"></path><circle cx="12" cy="10" r="3"></circle><path d="M12 13c-2.67 0-8 1.34-8 4v1h16v-1c0-2.66-5.33-4-8-4z"></path></svg>');
-  background-repeat: no-repeat;
-  background-position: center;
-  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: #2c2f33; /* Cor de fundo do placeholder */
+  color: var(--text-color);
+  z-index: 2;
 }
 
-.video-play-button {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background-color: rgba(0, 0, 0, 0.6);
-  color: white;
-  border: none;
+.video-placeholder .avatar {
+  width: 50px;
+  height: 50px;
   border-radius: 50%;
-  width: 60px;
-  height: 60px;
+  background-color: var(--primary-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 24px;
-  cursor: pointer;
-  z-index: 10;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+.video-placeholder .placeholder-text {
+  font-size: 12px;
+  text-align: center;
+}
+
+.video-container.video-off .video-placeholder {
+  display: flex; /* Mostrar placeholder quando video-off */
+}
+
+.video-container.video-off video {
+  display: none; /* Esconder o elemento de vídeo quando video-off */
+}
+
+.video-container:not(.video-off) .video-placeholder {
+  display: none; /* Esconder placeholder quando vídeo está ativo */
 }
 
 /* Barra de controles */
@@ -303,54 +331,34 @@ body.login-page {
 
 /* PIP Container */
 .pip-container {
-  position: absolute;
-  top: 70px;
-  right: 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  z-index: 90;
-  max-height: calc(100vh - 160px);
-  overflow-y: auto;
+  gap: 8px; /* Espaçamento entre PIPs */
+  z-index: 10; /* Abaixo dos controles, mas acima do vídeo principal se sobreposto */
+  pointer-events: auto;
+  /* Estilos base para desktop, serão sobrescritos em mobile */
+  position: relative; /* Para layout flex em desktop */
   width: var(--pip-width-desktop);
-  pointer-events: auto; /* Garantir que eventos de clique sejam capturados */
-  visibility: visible !important; /* Forçar visibilidade */
-  display: flex !important; /* Forçar exibição */
-  opacity: 1 !important; /* Garantir opacidade total */
+  padding: 8px;
+  background-color: rgba(0,0,0,0.1);
+  max-height: calc(100vh - 140px); /* header + controls */
+  overflow-y: auto;
 }
 
 .pip-container .video-container {
-  width: var(--pip-width-desktop);
-  height: var(--pip-height-desktop);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-  transition: transform 0.2s;
+  width: 100%; /* Ocupar toda a largura do pip-container */
+  height: auto;
+  aspect-ratio: 16/9; /* Manter proporção */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   cursor: pointer;
-  flex-shrink: 0; /* Impede que os PIPs sejam reduzidos */
-  visibility: visible !important;
-  display: block !important;
-  border: 2px solid rgba(255, 255, 255, 0.2); /* Adicionar bordas para melhor visualização */
-  border-radius: 8px;
-  overflow: hidden;
-  transition: all 0.3s ease;
+  flex-shrink: 0; 
+  border: 1px solid var(--border-color);
+  transition: transform 0.2s, border-color 0.2s;
 }
 
 .pip-container .video-container:hover {
-  transform: scale(1.05);
-  z-index: 91;
+  transform: scale(1.03);
   border-color: var(--primary-color);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.pip-container .video-container video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  background-color: #1a1a1a;
-}
-
-.pip-container .video-container .participant-name {
-  /* ... existing styles ... */
-  font-size: 0.7rem; /* Reduzir um pouco para PIPs */
 }
 
 /* Nome do participante */
@@ -511,59 +519,86 @@ body.login-page {
   
   /* PIP Container mobile - mostrar apenas um PIP */
   .pip-container {
-    position: absolute;
-    bottom: 75px; /* Posicionado acima dos controles */
-    right: 10px;
-    top: auto;
-    width: var(--pip-width-mobile);
-    max-height: 30%;
-    flex-direction: column;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-  
-  .pip-container .video-container {
-    width: var(--pip-width-mobile);
-    height: var(--pip-height-mobile);
-  }
-  
-  /* Mostrar apenas o primeiro PIP em dispositivos móveis */
-  .pip-container .video-container:not(:first-child) {
-    display: none;
-  }
-  
-  /* Esconder scrollbar no mobile */
-  .pip-container::-webkit-scrollbar {
-    display: none;
-  }
-  
-  /* Posicionamento mais específico e forçado para o PIP mobile */
-  .pip-container {
-    position: absolute !important;
-    display: flex !important;
-    z-index: 100 !important; /* Aumentar z-index para garantir visibilidade */
-    bottom: 80px !important; /* Garantir posição acima dos controles */
+    position: absolute !important; /* Posicionamento fixo sobre o vídeo */
+    bottom: 80px !important; /* Acima dos controles (65px + 15px margem) */
     right: 10px !important;
     width: var(--pip-width-mobile) !important;
-    height: var(--pip-height-mobile) !important;
-    max-height: var(--pip-height-mobile) !important;
-    overflow: visible !important;
-    pointer-events: auto !important;
-    visibility: visible !important;
-    opacity: 1 !important;
+    max-height: var(--pip-height-mobile) !important; /* Apenas um PIP visível */
+    padding: 0 !important;
+    background-color: transparent !important;
+    gap: 0 !important;
+    overflow: hidden !important; /* Não deve ter scroll */
+    z-index: 20 !important; /* Acima do vídeo principal, abaixo dos menus de settings */
   }
-  
+
   .pip-container .video-container {
     width: var(--pip-width-mobile) !important;
     height: var(--pip-height-mobile) !important;
-    visibility: visible !important;
-    display: block !important;
-    opacity: 1 !important;
+    margin-bottom: 0 !important;
+    border: 1px solid rgba(255,255,255,0.2) !important;
   }
-  
-  /* Forçar o primeiro PIP a ser visível em mobile */
-  .pip-container .video-container:first-child {
-    display: block !important;
+
+  /* Mostrar apenas o primeiro PIP em dispositivos móveis, se houver mais de um */
+  /* A lógica JS já limita a um, mas CSS para garantir */
+  .pip-container .video-container:not(:first-child) {
+    display: none !important;
+  }
+
+  .call-controls {
+    /* ... existing mobile styles ... */
+    height: 65px; 
+    z-index: 30; /* Controles acima de tudo */
+  }
+
+  .settings-menu {
+    bottom: 75px; /* Acima dos controles */
+    z-index: 40; /* Menus acima dos PIPs e controles */
+  }
+
+  .video-area {
+    flex-direction: column; /* Empilhar main e pips (se pips fossem visíveis aqui) */
+    padding-bottom: 65px; /* Altura dos controles mobile */
+  }
+
+  .main-video-container {
+    height: 100%; /* Ocupar todo o espaço disponível na vertical */
+  }
+
+  .pip-container {
+    position: absolute !important; /* Posicionamento fixo sobre o vídeo */
+    bottom: 80px !important; /* Acima dos controles (65px + 15px margem) */
+    right: 10px !important;
+    width: var(--pip-width-mobile) !important;
+    max-height: var(--pip-height-mobile) !important; /* Apenas um PIP visível */
+    padding: 0 !important;
+    background-color: transparent !important;
+    gap: 0 !important;
+    overflow: hidden !important; /* Não deve ter scroll */
+    z-index: 20 !important; /* Acima do vídeo principal, abaixo dos menus de settings */
+  }
+
+  .pip-container .video-container {
+    width: var(--pip-width-mobile) !important;
+    height: var(--pip-height-mobile) !important;
+    margin-bottom: 0 !important;
+    border: 1px solid rgba(255,255,255,0.2) !important;
+  }
+
+  /* Mostrar apenas o primeiro PIP em dispositivos móveis, se houver mais de um */
+  /* A lógica JS já limita a um, mas CSS para garantir */
+  .pip-container .video-container:not(:first-child) {
+    display: none !important;
+  }
+
+  .call-controls {
+    /* ... existing mobile styles ... */
+    height: 65px; 
+    z-index: 30; /* Controles acima de tudo */
+  }
+
+  .settings-menu {
+    bottom: 75px; /* Acima dos controles */
+    z-index: 40; /* Menus acima dos PIPs e controles */
   }
 
   .meet-header h1 {
@@ -793,6 +828,13 @@ video::-webkit-media-controls {
 }
 
 /* Adicionar estilos para a classe video-active e video-off se necessário */
+.video-container.video-off .status-icons .fa-video-slash {
+  display: inline-block; /* Mostrar ícone de vídeo desligado */
+}
+.video-container.video-off .status-icons .fa-video {
+  display: none; /* Esconder ícone de vídeo ligado */
+}
+
 .video-container.video-off .status-icons {
   /* Estilos para quando o vídeo está desligado, ex: mostrar um ícone de câmera desligada */
 }

@@ -59,6 +59,54 @@ const copyLinkButton = document.getElementById('copy-link');
 const closeShareButton = document.getElementById('close-share');
 const roomCodeElement = document.getElementById('room-code');
 
+// Adicionar a definição da função handleResize e outras lógicas relacionadas ao layout
+const MAX_VISIBLE_PIPS_DESKTOP = 4; // Máximo de PIPs visíveis em desktop
+
+function handleResize() {
+  const isMobile = window.innerWidth <= 768;
+  const pipVideos = pipContainer.querySelectorAll('.video-container');
+
+  if (isMobile) {
+    // Em mobile, mostrar apenas o vídeo principal, ocultar todos os PIPs
+    pipContainer.style.display = 'none';
+    mainVideoContainer.style.flexGrow = '1'; // Ocupar todo o espaço
+    pipVideos.forEach(pip => {
+      pip.style.display = 'none';
+    });
+    // Garantir que o vídeo principal esteja visível e ajustado
+    const mainVideo = mainVideoContainer.querySelector('.video-container video');
+    if (mainVideo) {
+        mainVideo.style.objectFit = 'contain';
+    }
+
+  } else {
+    // Em desktop, mostrar PIPs e ajustar layout
+    pipContainer.style.display = 'flex'; // Usar flex para organizar PIPs
+    mainVideoContainer.style.flexGrow = '3'; // Dar mais espaço ao vídeo principal
+    let visiblePips = 0;
+    pipVideos.forEach(pip => {
+      if (visiblePips < MAX_VISIBLE_PIPS_DESKTOP) {
+        pip.style.display = 'flex'; // Usar flex para o container do PIP
+        visiblePips++;
+      } else {
+        pip.style.display = 'none';
+      }
+    });
+    // Ajustar o vídeo principal e os PIPs
+    const mainVideo = mainVideoContainer.querySelector('.video-container video');
+    if (mainVideo) {
+        mainVideo.style.objectFit = 'contain';
+    }
+    pipVideos.forEach(pip => {
+        const video = pip.querySelector('video');
+        if (video) {
+            video.style.objectFit = 'cover'; // PIPs podem usar cover
+        }
+    });
+  }
+  console.log(`Desktop: Garantindo que todos os ${pipVideos.length} PIPs estejam visíveis (máx ${MAX_VISIBLE_PIPS_DESKTOP} em desktop, mobile: ${isMobile}).`);
+}
+
 // Obter código da sala a partir da URL
 const urlParams = new URLSearchParams(window.location.search);
 const roomCode = urlParams.get('room');
@@ -181,6 +229,10 @@ async function init() {
     
     await updateDeviceList();
   }
+  // Chamar handleResize após a inicialização e carregamento do DOM
+  handleResize(); 
+  // Adicionar listener para redimensionamento da janela
+  window.addEventListener('resize', handleResize);
 }
 
 // Criar container de vídeo
@@ -218,6 +270,11 @@ function createVideoContainer(id, name, stream) {
   // Anexar o stream ao vídeo
   if (stream) {
     video.srcObject = stream;
+  }
+
+  // Adicionar classe video-off para streams remotos inicialmente
+  if (id !== 'local') {
+    container.classList.add('video-off');
   }
   
   // Adicionar evento de clique para alternar entre principal e PIP
@@ -281,6 +338,7 @@ function toggleMainVideo(id) {
     detail: { id: id } 
   });
   window.dispatchEvent(event);
+  handleResize(); // Chamar handleResize após trocar o vídeo principal
 }
 
 // Modificar a função handleRemoteStream para garantir que os vídeos PIP sejam exibidos corretamente
