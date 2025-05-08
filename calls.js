@@ -285,79 +285,55 @@ function toggleMainVideo(id) {
 
 // Modificar a função handleRemoteStream para garantir que os vídeos PIP sejam exibidos corretamente
 function handleRemoteStream(stream, userId, userName) {
-  console.log('Handle remote stream called for', userId);
+  console.log(`Handle remote stream called for ${userId}, user: ${userName}`);
   
-  // Verificar se o container já existe
   const existingContainer = document.getElementById(`container-${userId}`);
   if (existingContainer) {
     const video = document.getElementById(`video-${userId}`);
     if (video) {
+      console.log(`Atualizando stream para container existente ${userId}`);
       addStreamToVideoElement(stream, video, userId);
     }
     return;
   }
   
-  // Criar novo container de vídeo
+  console.log(`Criando novo container de vídeo para ${userId}`);
   const container = createVideoContainer(userId, userName || 'Participante', stream);
   
-  // Garantir que o pipContainer exista
   if (!pipContainer) {
-    console.error('Elemento pip-container não encontrado, recriando...');
-    const videoArea = document.querySelector('.video-area');
-    const newPipContainer = document.createElement('div');
-    newPipContainer.id = 'pip-container';
-    newPipContainer.className = 'pip-container';
-    videoArea.appendChild(newPipContainer);
-    pipContainer = newPipContainer;
+    console.error('Elemento pip-container não encontrado!');
+    // Não tentar recriar aqui, pois deve existir desde o HTML.
+    // Se não existir, é um erro de carregamento do DOM.
+    return; 
   }
   
-  // Verificar se é mobile
   const isMobile = window.innerWidth <= 768;
-  const maxPipInMobile = 1; // Máximo de PIPs em mobile
   
-  // Adicionar ao PIP e garantir que exista um vídeo principal
   if (mainVideoContainer.querySelector('.video-container')) {
-    // Já existe vídeo principal, adicionar ao PIP
     pipContainer.appendChild(container);
     container.classList.add('pip-video');
-    
-    // Em dispositivos móveis, limitar o número de PIPs visíveis
-    if (isMobile) {
-      const pips = pipContainer.querySelectorAll('.video-container');
-      if (pips.length > maxPipInMobile) {
-        // Tornar todos visíveis primeiro para não afetar a ordem
-        pips.forEach(pip => pip.style.display = 'block');
-        // Depois esconder os excedentes
-        Array.from(pips).slice(maxPipInMobile).forEach(pip => {
-          pip.style.display = 'none';
-        });
-      }
-    }
+    console.log(`Adicionado ${userId} ao pipContainer.`);
   } else {
-    // Não existe vídeo principal, definir este como principal
     mainVideoContainer.appendChild(container);
     container.classList.add('main-video');
     activeSpeakerId = userId;
+    console.log(`Adicionado ${userId} ao mainVideoContainer como principal.`);
   }
   
-  // Usar a função de addStreamToVideoElement para garantir reprodução
+  // Aplicar lógica de visibilidade de PIPs (especialmente após adicionar um novo)
+  handleResize(); // Chamar handleResize para aplicar a lógica de exibição correta
+
   const video = document.getElementById(`video-${userId}`);
   if (video) {
+    const videoContainerElement = document.getElementById(`container-${userId}`);
+    if (videoContainerElement && window.getComputedStyle(videoContainerElement).display === 'none') {
+        console.warn(`Container para ${userId} está com display:none antes de adicionar stream. Verificando lógica de handleResize.`);
+        // A lógica de display já deve ser tratada por handleResize
+    }
     addStreamToVideoElement(stream, video, userId);
-    
-    // Executar um timeout para garantir que o vídeo seja carregado e exibido
-    setTimeout(() => {
-      // Forçar a reprodução novamente
-      video.play().catch(e => {
-        console.warn('Erro ao iniciar reprodução automática após timeout:', e);
-        // Tentar usar muted para contornar restrições de autoplay
-        video.muted = true;
-        video.play().catch(e2 => console.error('Falha mesmo com muted:', e2));
-      });
-    }, 1000);
-    
-    // Detectar áudio do participante para active speaker
     detectAudioActivity(stream, userId);
+  } else {
+    console.error(`Elemento de vídeo video-${userId} não encontrado após criar container.`);
   }
 }
 
@@ -899,8 +875,9 @@ window.addEventListener('video-active', (event) => {
   const { peerId } = event.detail;
   const container = document.getElementById(`container-${peerId}`);
   if (container) {
-    container.classList.add('video-active');
+    console.log(`Evento video-active recebido para ${peerId}. Removendo video-off.`);
     container.classList.remove('video-off');
+    container.classList.add('video-active'); 
   }
 });
 
@@ -960,22 +937,25 @@ window.addEventListener('DOMContentLoaded', () => {
   const handleResize = () => {
     const isMobile = window.innerWidth <= 768;
     document.documentElement.classList.toggle('mobile', isMobile);
-    
+
     if (pipContainer) {
       const pips = pipContainer.querySelectorAll('.video-container');
       if (isMobile) {
-        // Em dispositivos móveis, mostrar apenas o primeiro PIP
+        // Em dispositivos móveis, CSS agora controla para mostrar apenas o primeiro PIP
+        // Esta lógica JS pode ser simplificada ou removida se o CSS for suficiente
         pips.forEach((pip, index) => {
-            // O primeiro PIP (index 0) deve ser 'block', os demais 'none'
-            // A menos que não haja PIPs, ou apenas um.
-            if (pips.length > 0) {
-                 pip.style.display = (index === 0) ? 'block' : 'none';
-            }
+            // O CSS :not(:first-child) { display: none !important; } deve cuidar disso
+            // Mas para garantir consistência com JS, podemos manter:
+             pip.style.display = (index === 0) ? 'block' : 'none';
         });
+        if (pips.length > 1) {
+            console.log("Mobile: Mostrando apenas o primeiro PIP, escondendo os demais.");
+        }
       } else {
         // Em desktop, mostrar todos os PIPs
+        console.log(`Desktop: Garantindo que todos os ${pips.length} PIPs estejam visíveis.`);
         pips.forEach(pip => {
-          pip.style.display = 'block';
+          pip.style.display = 'block'; // Ou 'flex' se o container usar display:flex
         });
       }
     }

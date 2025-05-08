@@ -535,137 +535,98 @@ export function disconnect() {
 }
 
 // Substituir a função ensureVideoIsVisible por uma versão melhorada
-function ensureVideoIsVisible(videoElement, peerId, maxAttempts = 20) {
+function ensureVideoIsVisible(video, peerId) {
   let attempts = 0;
-  const checkInterval = setInterval(() => {
-    if (attempts > maxAttempts) {
-      console.warn(`Desistindo de verificar vídeo para ${peerId} após ${maxAttempts} tentativas`);
-      clearInterval(checkInterval);
-      return;
-    }
+  const maxAttempts = 35; // Aumentar um pouco as tentativas
+  const interval = 250; // Aumentar um pouco o intervalo
+
+  log(`[WebRTC] Iniciando verificação de visibilidade para ${peerId}. Muted: ${video.muted}, Paused: ${video.paused}, ReadyState: ${video.readyState}`);
+
+  const checkVideo = setInterval(() => {
     attempts++;
     
-    if (videoElement.paused || videoElement.videoWidth === 0 || videoElement.readyState < 3) {
-      console.log(`Tentativa ${attempts}/${maxAttempts} de reproduzir vídeo do peer ${peerId}`);
-      videoElement.play().catch(e => {
-        console.log(`Erro ao forçar play (tentativa ${attempts}):`, e);
-        
-        // Na tentativa 5, tentar forçar com mute se ainda não estiver mudo
-        if (attempts === 5 && !videoElement.muted && peerId !== 'local') {
-          console.log(`Tentando com muted para ${peerId}`);
-          videoElement.muted = true;
-        }
-        
-        // Na tentativa 10, tentar recarregar o stream
-        if (attempts === 10) {
-          console.log(`Tentando recarregar stream para ${peerId}`);
-          const stream = videoElement.srcObject;
-          videoElement.srcObject = null;
-          setTimeout(() => {
-            videoElement.srcObject = stream;
-            videoElement.play().catch(() => {});
-          }, 500);
-        }
-      });
-    } else if (videoElement.readyState >= 3 && !videoElement.paused) {
-      console.log(`Vídeo do peer ${peerId} está reproduzindo corretamente!`);
-      clearInterval(checkInterval);
-      
-      // Disparar um evento para notificar que o vídeo está ativo
-      const event = new CustomEvent('video-active', { 
-        detail: { peerId: peerId } 
-      });
-      window.dispatchEvent(event);
-      
-      // Se foi necessário mutar temporariamente, restaurar áudio após alguns segundos
-      if (videoElement.muted && peerId !== 'local') {
-        setTimeout(() => {
-          videoElement.muted = false;
-          console.log(`Áudio restaurado para ${peerId}`);
-        }, 3000); // Dar um tempo para que o usuário tenha interagido com a página
-      }
+    if (!document.body.contains(video)) {
+        log(`[WebRTC] Elemento de vídeo para ${peerId} não está mais no DOM. Interrompendo verificação.`, 'warn');
+        clearInterval(checkVideo);
+        return;
     }
-  }, 1000);
+
+    const styles = window.getComputedStyle(video);
+    const isElementVisible = styles.display !== 'none' && styles.visibility !== 'hidden' && video.offsetParent !== null && video.clientWidth > 0 && video.clientHeight > 0;
+    const hasVideoData = video.readyState >= 2; // HAVE_CURRENT_DATA ou superior
+    const hasDimensions = video.videoWidth > 0 && video.videoHeight > 0;
+
+    log(`[WebRTC Tentativa ${attempts}/${maxAttempts}] Vid: ${peerId}. State: ${video.readyState}, W: ${video.videoWidth}, H: ${video.videoHeight}, Paused: ${video.paused}, VisibleDOM: ${isElementVisible}, HasData: ${hasVideoData}, HasDims: ${hasDimensions}`);
+
+    if (hasVideoData && hasDimensions && isElementVisible && !video.paused) {
+      log(`[WebRTC] Vídeo para ${peerId} está visível e reproduzindo.`);
+      clearInterval(checkVideo);
+      const event = new CustomEvent('video-active', { detail: { peerId: peerId } });
+      window.dispatchEvent(event);
+    } else if (attempts >= maxAttempts) {
+      log(`[WebRTC] Desistindo de verificar vídeo para ${peerId} após ${maxAttempts} tentativas. Estado final - State: ${video.readyState}, W: ${video.videoWidth}, H: ${video.videoHeight}, Paused: ${video.paused}, VisibleDOM: ${isElementVisible}`, 'error');
+      clearInterval(checkVideo);
+      // Se desistiu, mas o elemento está visível e tem stream, pode ser que o 'play' não tenha funcionado
+      // ou o stream não tem vídeo.
+      if (isElementVisible && video.srcObject && video.srcObject.getVideoTracks().length === 0) {
+          log(`[WebRTC] Stream para ${peerId} não contém faixas de vídeo.`, 'warn');
+      } else if (isElementVisible && video.paused) {
+          log(`[WebRTC] Vídeo para ${peerId} permaneceu pausado.`, 'warn');
+      }
+    } else if (isElementVisible && video.paused && hasVideoData) {
+        log(`[WebRTC] Vídeo para ${peerId} está visível e com dados, mas pausado. Tentando play... (Tentativa ${attempts})`);
+        video.play().catch(e => log(`[WebRTC] Erro ao tentar play em ensureVideoIsVisible para ${peerId} (tentativa ${attempts}): ${e.message}`, 'warn'));
+    } else if (isElementVisible && !hasDimensions && hasVideoData && !video.paused) {
+        log(`[WebRTC] Vídeo para ${peerId} está reproduzindo e visível, mas dimensões ainda não disponíveis. Aguardando... (Tentativa ${attempts})`);
+    }
+  }, interval);
 }
 
 // Melhorar a função addStreamToVideoElement para garantir que os vídeos sejam carregados corretamente
 export function addStreamToVideoElement(stream, videoElement, peerId) {
-  log("Adicionando stream a elemento de vídeo para " + peerId);
-  
-  // Certificar-se de que o stream não é nulo
   if (!stream) {
-    console.error(`Stream inválido para ${peerId}`);
+    log(`[WebRTC] Stream nulo fornecido para ${peerId || 'vídeo desconhecido'}`, 'error');
     return;
   }
-  
-  // Certificar-se de que o elemento de vídeo existe
   if (!videoElement) {
-    console.error(`Elemento de vídeo não encontrado para ${peerId}`);
+    log(`[WebRTC] Elemento de vídeo nulo fornecido para ${peerId || 'stream desconhecido'}`, 'error');
     return;
   }
+
+  log(`[WebRTC] Adicionando stream a elemento de vídeo para ${peerId}. Tracks: ${stream.getTracks().map(t => t.kind).join(', ')}`);
   
   videoElement.srcObject = stream;
-  videoElement.autoplay = true;
   videoElement.playsInline = true;
-  videoElement.muted = peerId === 'local'; // Mutar apenas o vídeo local
-  
-  // Forçar play com tratamento de erro aprimorado
-  const playPromise = videoElement.play();
-  
-  if (playPromise !== undefined) {
-    playPromise.catch(error => {
-      console.warn('Erro ao reproduzir vídeo automaticamente:', error);
-      
-      // Se o erro for devido a restrições de autoplay, tentar novamente com muted
-      if (error.name === 'NotAllowedError' && peerId !== 'local') {
-        console.log(`Tentando autoplay com muted para ${peerId}`);
-        videoElement.muted = true;
-        
-        videoElement.play().catch(e => {
-          console.error(`Falha mesmo com muted para ${peerId}:`, e);
-          
-          // Mostrar botão de play se autoplay falhar
-          const container = videoElement.parentElement;
-          if (container && !container.querySelector('.video-play-button')) {
-            const playButton = document.createElement('button');
-            playButton.className = 'video-play-button';
-            playButton.innerHTML = '<i class="fas fa-play"></i>';
-            playButton.onclick = () => {
-              videoElement.play()
-                .then(() => {
-                  playButton.remove();
-                  // Restaurar áudio depois que o usuário interagir
-                  if (peerId !== 'local') {
-                    setTimeout(() => { videoElement.muted = false; }, 1000);
-                  }
-                })
-                .catch(e => console.log('Erro ao forçar play:', e));
-            };
-            container.appendChild(playButton);
-          }
-        });
-      }
-    });
+  videoElement.autoplay = true;
+
+  // Mutar vídeos remotos para ajudar com políticas de autoplay, exceto se for o local
+  // O vídeo local já é mutado na sua criação.
+  if (peerId && peerId !== 'local') {
+    videoElement.muted = true; 
+    log(`[WebRTC] Vídeo remoto ${peerId} mutado para auxiliar autoplay.`);
   }
-  
-  // Registrar múltiplos eventos para garantir reprodução
-  videoElement.addEventListener('loadedmetadata', () => {
-    log(`Metadata de vídeo carregada para ${peerId}`);
-    videoElement.play().catch(e => console.log(`Erro no loadedmetadata para ${peerId}:`, e));
+
+  videoElement.play().then(() => {
+    log(`[WebRTC] Playback iniciado com sucesso para ${peerId || 'stream desconhecido'}`);
+    ensureVideoIsVisible(videoElement, peerId);
+  }).catch(error => {
+    log(`[WebRTC] Erro ao tentar reproduzir vídeo para ${peerId}: ${error.message} (Name: ${error.name})`, 'error');
+    if (peerId && peerId !== 'local' && !videoElement.muted) {
+        log(`[WebRTC] Tentando novamente com muted para ${peerId} após falha inicial.`);
+        videoElement.muted = true;
+        videoElement.play().then(() => {
+            log(`[WebRTC] Playback com muted iniciado para ${peerId}`);
+            ensureVideoIsVisible(videoElement, peerId);
+        }).catch(err2 => {
+            log(`[WebRTC] Erro ao tentar reproduzir vídeo COM MUTED para ${peerId}: ${err2.message} (Name: ${err2.name})`, 'error');
+        });
+    } else if (error.name === 'NotAllowedError' || error.name === 'AbortError') {
+         log(`[WebRTC] Playback para ${peerId} bloqueado ou abortado. Interação do usuário pode ser necessária ou stream pode não ter vídeo.`, 'warn');
+         // Mesmo se o play falhar, ainda tentar chamar ensureVideoIsVisible, 
+         // pois o vídeo pode já estar carregando metadados.
+         ensureVideoIsVisible(videoElement, peerId);
+    }
   });
-  
-  videoElement.addEventListener('loadeddata', () => {
-    log(`Dados de vídeo carregados para ${peerId}`);
-    videoElement.play().catch(e => console.log(`Erro no loadeddata para ${peerId}:`, e));
-  });
-  
-  videoElement.addEventListener('canplay', () => {
-    log(`Vídeo pode ser reproduzido para ${peerId}`);
-    videoElement.play().catch(e => console.log(`Erro no canplay para ${peerId}:`, e));
-  });
-  
-  // Verificar periodicamente o estado do vídeo com tempo máximo maior
-  ensureVideoIsVisible(videoElement, peerId, 30); // 30 tentativas (30 segundos)
 }
 
 // Adicione esta função de exportação para debug

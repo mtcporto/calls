@@ -151,11 +151,13 @@ body.login-page {
 
 /* Área de vídeos */
 .video-area {
-  flex: 1;
-  position: relative;
-  overflow: hidden;
+  flex-grow: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: column; /* Garante que o main video e pip container se empilhem verticalmente se necessário */
+  position: relative; /* Necessário para o posicionamento absoluto do pip-container */
+  overflow: hidden; /* Evitar barras de rolagem inesperadas */
+  background-color: #121212; /* Cor de fundo da área de vídeo */
+  padding-bottom: 70px; /* Espaço para os controles fixos no rodapé */
 }
 
 .main-video-container {
@@ -344,6 +346,11 @@ body.login-page {
   height: 100%;
   object-fit: cover;
   background-color: #1a1a1a;
+}
+
+.pip-container .video-container .participant-name {
+  /* ... existing styles ... */
+  font-size: 0.7rem; /* Reduzir um pouco para PIPs */
 }
 
 /* Nome do participante */
@@ -558,6 +565,70 @@ body.login-page {
   .pip-container .video-container:first-child {
     display: block !important;
   }
+
+  .meet-header h1 {
+    font-size: 1rem;
+  }
+
+  .main-video-container {
+    height: calc(100% - 60px); /* Ajustar altura, considerando controles */
+  }
+
+  .pip-container {
+    position: absolute;
+    top: auto; /* Remover posicionamento pelo topo */
+    bottom: 75px; /* Posicionar acima dos controles (altura dos controles + margem) */
+    right: 10px;
+    width: 100px; 
+    height: auto; 
+    max-height: 140px; /* Altura máxima para o PIP no celular */
+    z-index: 10; 
+    display: flex; /* Usar flex para gerenciar o único PIP visível */
+    flex-direction: column;
+  }
+
+  .pip-container .video-container {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9; /* Manter proporção */
+    margin-bottom: 0; /* Sem margem inferior, pois só um será visível */
+    border: 1px solid #444; /* Borda sutil para o PIP */
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .pip-container .video-container video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  
+  /* Esconder PIPs extras no celular, mostrando apenas o primeiro */
+  .pip-container .video-container:not(:first-child) {
+    display: none !important;
+  }
+
+  .call-controls {
+    padding: 8px;
+    height: 65px; /* Altura fixa para os controles */
+    z-index: 20; /* Controles acima do PIP */
+  }
+
+  .control-button, .settings-button {
+    width: 40px;
+    height: 40px;
+    font-size: 0.9rem;
+  }
+
+  .settings-menu {
+    bottom: 55px; /* Ajustar para aparecer acima dos controles */
+  }
+
+  /* Ajustar a área de vídeo principal para não sobrepor os controles ou o PIP */
+  .video-area {
+    /* padding-bottom já definido globalmente, pode ser ajustado aqui se necessário */
+    /* Ex: padding-bottom: 130px; para dar mais espaço se o PIP e controles estiverem próximos */
+  }
 }
 
 /* Responsividade - Desktop hover effects */
@@ -606,6 +677,47 @@ body.login-page {
     visibility: visible !important;
     display: block !important;
     opacity: 1 !important;
+  }
+
+  .video-area {
+    flex-direction: row; /* Vídeo principal e PIPs lado a lado */
+     padding-bottom: 70px; /* Manter espaço para controles */
+  }
+
+  .main-video-container {
+    flex-grow: 1; /* Ocupa o espaço restante */
+    height: 100%; 
+  }
+
+  .pip-container {
+    position: relative; /* Voltar para relativo ou estático para fluir no layout flex */
+    top: 0;
+    right: 0;
+    width: 220px; /* Largura da coluna de PIPs no desktop */
+    height: 100%; /* Ocupar toda a altura da video-area */
+    max-height: calc(100vh - 130px); /* Altura máxima (header + controles) */
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px; /* Espaçamento interno */
+    background-color: #1a1a1a; /* Fundo para a coluna de PIPs */
+    order: 1; /* Coloca os PIPs à direita do vídeo principal */
+  }
+
+  .pip-container .video-container {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    background-color: #2c2c2c;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .pip-container .video-container video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 }
 
@@ -679,3 +791,18 @@ video::-webkit-media-controls {
   width: 100% !important;
   height: 100% !important;
 }
+
+/* Adicionar estilos para a classe video-active e video-off se necessário */
+.video-container.video-off .status-icons {
+  /* Estilos para quando o vídeo está desligado, ex: mostrar um ícone de câmera desligada */
+}
+.video-container.video-off video {
+  background-color: #000; /* Fundo preto quando o vídeo está desligado */
+}
+
+.video-container.video-active {
+  border-color: #00ff00; /* Exemplo: borda verde quando o vídeo está ativo (para debug) */
+}
+
+/* Wake Lock styles (se houver algum elemento visual associado) */
+/* ... */
