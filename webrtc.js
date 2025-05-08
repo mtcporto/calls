@@ -39,7 +39,7 @@ const configuration = {
 };
 
 // URL do servidor de sinalização (Cloudflare Worker)
-const SIGNALING_SERVER = 'https://webrtc.mosaicoworkers.workers.dev';
+const SIGNALING_SERVER = 'https://webrtc-signaling.mosaicoworkers.workers.dev';
 
 // Variáveis globais
 let peerConnections = {}; // Armazena conexões peer
