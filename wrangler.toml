@@ -1,7 +1,0 @@
-name = "webrtc-signaling"
-main = "worker.js"
-compatibility_date = "2023-05-25"
-
-[[kv_namespaces]]
-binding = "WEBRTC_ROOMS"
-id = "1ece5577aff346cc8cb777e579ffeaf3"

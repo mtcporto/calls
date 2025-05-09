@@ -329,9 +329,9 @@ body.login-page {
   cursor: pointer;
 }
 
-/* PIP Container */
+/* PIP Container - Regras atualizadas com a margem sugerida */
 .pip-container {
-  margin-top: -6%;
+  margin-top: -6%; /* Margem negativa que você identificou como funcionando bem */
   display: flex !important; /* Forçar display flex sempre */
   flex-direction: column;
   gap: 8px; /* Espaçamento entre PIPs */

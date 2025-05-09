@@ -1,41 +1,129 @@
 // Código para o Cloudflare Worker (signaling.js)
-// Versão com Cloudflare KV para armazenamento persistente
+// Versão com Supabase para armazenamento persistente usando API REST
 
-// Binding do KV namespace - corresponde ao definido no wrangler.toml
-// [[kv_namespaces]]
-// binding = "WEBRTC_ROOMS"
-// id = "1ece5577aff346cc8cb777e579ffeaf3"
+// Configurações do Supabase
+const SUPABASE_URL = 'https://supabase-url.supabase.co'; // Substitua pela URL real do seu projeto Supabase
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjcGd4eWZ1Z2xheG90bWpncXdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1NzQ1MzIsImV4cCI6MjA2MjE1MDUzMn0.jl1UAVCIgkHXqgZyLwAfuMtbr_xbblLQdDH2vMVXKdw'; // Substitua pela sua API Key do Supabase
 
 // Utilidades para estruturas de dados
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-// Helpers para lidar com KV
+// Helpers para lidar com Supabase via API REST
 async function getRoomData(roomId) {
   try {
-    const roomData = await WEBRTC_ROOMS.get(`room:${roomId}`, { type: "json" });
-    return roomData || { users: {}, signals: [] };
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?room_id=eq.${encodeURIComponent(roomId)}&select=room_data`, {
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      }
+    });
+    
+    if (!response.ok) {
+      console.error(`Erro ao recuperar sala ${roomId}: ${response.status} ${response.statusText}`);
+      return { users: {}, signals: [] };
+    }
+    
+    const data = await response.json();
+    return data.length > 0 ? data[0].room_data : { users: {}, signals: [] };
   } catch (error) {
-    console.error(`Erro ao recuperar sala ${roomId}:`, error);
+    console.error(`Exceção ao recuperar sala ${roomId}:`, error);
     return { users: {}, signals: [] };
   }
 }
 
 async function saveRoomData(roomId, data) {
   try {
-    await WEBRTC_ROOMS.put(`room:${roomId}`, JSON.stringify(data), {
-      expirationTtl: 86400 // 24 horas
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 86400 * 1000); // 24 horas depois
+    
+    // Verificar se a sala já existe
+    const checkResponse = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?room_id=eq.${encodeURIComponent(roomId)}&select=id`, {
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Content-Type': 'application/json'
+      }
     });
+    
+    if (!checkResponse.ok) {
+      console.error(`Erro ao verificar sala ${roomId}: ${checkResponse.status} ${checkResponse.statusText}`);
+      return;
+    }
+    
+    const existingRooms = await checkResponse.json();
+    const roomExists = existingRooms.length > 0;
+    
+    // Preparar os dados
+    const roomData = {
+      room_data: data,
+      updated_at: now.toISOString(),
+      expires_at: expiresAt.toISOString()
+    };
+    
+    let response;
+    
+    if (roomExists) {
+      // Atualizar sala existente
+      response = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?room_id=eq.${encodeURIComponent(roomId)}`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(roomData)
+      });
+    } else {
+      // Criar nova sala
+      roomData.room_id = roomId;
+      roomData.created_at = now.toISOString();
+      
+      response = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(roomData)
+      });
+    }
+    
+    if (!response.ok) {
+      console.error(`Erro ao ${roomExists ? 'atualizar' : 'criar'} sala ${roomId}: ${response.status} ${response.statusText}`);
+    }
   } catch (error) {
-    console.error(`Erro ao salvar sala ${roomId}:`, error);
+    console.error(`Exceção ao salvar sala ${roomId}:`, error);
   }
 }
 
 async function cleanupRooms() {
-  // Implementação opcional para remover salas antigas
-  // Este é um exemplo simplificado, em produção você precisaria
-  // listar todas as chaves e verificar cada sala
+  try {
+    const now = new Date().toISOString();
+    
+    // Remover salas expiradas
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?expires_at=lt.${encodeURIComponent(now)}`, {
+      method: 'DELETE',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      }
+    });
+    
+    if (!response.ok) {
+      console.error(`Erro ao limpar salas expiradas: ${response.status} ${response.statusText}`);
+    }
+  } catch (error) {
+    console.error('Exceção ao limpar salas expiradas:', error);
+  }
 }
+
+// Não podemos usar setInterval no escopo global em Cloudflare Workers
+// A limpeza será chamada periodicamente através de um gatilho externo ou cron trigger
 
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request));
@@ -300,24 +388,36 @@ async function handleRequest(request) {
   // Adicionar endpoint para verificação de status
   if (url.pathname === '/status') {
     try {
-      // Lista todas as keys que começam com "room:"
-      const keys = await WEBRTC_ROOMS.list({ prefix: "room:" });
-      const roomIds = keys.keys.map(key => key.name.replace("room:", ""));
+      // Obter todas as salas ativas do Supabase
+      const now = new Date().toISOString();
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?select=room_id,room_data&expires_at=gt.${encodeURIComponent(now)}`, {
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Content-Type': 'application/json'
+        }
+      });
       
-      // Obter estatísticas básicas
+      if (!response.ok) {
+        throw new Error(`Erro ao obter salas: ${response.status} ${response.statusText}`);
+      }
+      
+      const rooms = await response.json();
+      
+      // Calcular estatísticas
       let totalUsers = 0;
       let totalSignals = 0;
       let roomsData = {};
       
-      for (const roomId of roomIds) {
-        const roomData = await getRoomData(roomId);
+      for (const room of rooms) {
+        const roomData = room.room_data;
         const userCount = Object.keys(roomData.users || {}).length;
         const signalCount = (roomData.signals || []).length;
         
         totalUsers += userCount;
         totalSignals += signalCount;
         
-        roomsData[roomId] = {
+        roomsData[room.room_id] = {
           users: userCount,
           signals: signalCount
         };
@@ -327,7 +427,7 @@ async function handleRequest(request) {
         success: true,
         status: "online",
         stats: {
-          rooms: roomIds.length,
+          rooms: rooms.length,
           totalUsers,
           totalSignals,
           roomsData
@@ -344,6 +444,33 @@ async function handleRequest(request) {
       return new Response(JSON.stringify({
         success: false,
         error: 'Erro ao buscar status'
+      }), {
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json'
+        },
+        status: 500
+      });
+    }
+  }
+  
+  // Endpoint para limpeza manual de salas expiradas - pode ser configurado como um Cron trigger
+  if (url.pathname === '/cleanup' && (url.searchParams.get('key') === 'seu-token-secreto' || request.headers.get('Authorization') === 'Bearer seu-token-secreto')) {
+    try {
+      await cleanupRooms();
+      return new Response(JSON.stringify({
+        success: true,
+        message: "Limpeza concluída com sucesso"
+      }), {
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json'
+        }
+      });
+    } catch (error) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: "Erro durante a limpeza"
       }), {
         headers: {
           ...headers,
