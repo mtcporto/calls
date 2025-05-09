@@ -2,8 +2,8 @@
 // Versão com Supabase para armazenamento persistente usando API REST
 
 // Configurações do Supabase
-const SUPABASE_URL = 'https://supabase-url.supabase.co'; // Substitua pela URL real do seu projeto Supabase
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjcGd4eWZ1Z2xheG90bWpncXdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1NzQ1MzIsImV4cCI6MjA2MjE1MDUzMn0.jl1UAVCIgkHXqgZyLwAfuMtbr_xbblLQdDH2vMVXKdw'; // Substitua pela sua API Key do Supabase
+const SUPABASE_URL = 'https://wcpgxyfuglaxotmjgqwk.supabase.co'; // URL correta do projeto Supabase
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjcGd4eWZ1Z2xheG90bWpncXdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1NzQ1MzIsImV4cCI6MjA2MjE1MDUzMn0.jl1UAVCIgkHXqgZyLwAfuMtbr_xbblLQdDH2vMVXKdw'; // API Key do projeto Supabase
 
 // Utilidades para estruturas de dados
 const encoder = new TextEncoder();
@@ -12,21 +12,26 @@ const decoder = new TextDecoder();
 // Helpers para lidar com Supabase via API REST
 async function getRoomData(roomId) {
   try {
+    console.log(`[Supabase] Buscando sala ${roomId} em ${SUPABASE_URL}`);
     const response = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?room_id=eq.${encodeURIComponent(roomId)}&select=room_data`, {
       method: 'GET',
       headers: {
         'apikey': SUPABASE_KEY,
         'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
+        'Prefer': 'return=representation',
+        'Authorization': `Bearer ${SUPABASE_KEY}`
       }
     });
     
     if (!response.ok) {
       console.error(`Erro ao recuperar sala ${roomId}: ${response.status} ${response.statusText}`);
+      const errorText = await response.text();
+      console.error(`Detalhes: ${errorText}`);
       return { users: {}, signals: [] };
     }
     
     const data = await response.json();
+    console.log(`[Supabase] Sala ${roomId} encontrada: ${data.length > 0 ? 'Sim' : 'Não'}`);
     return data.length > 0 ? data[0].room_data : { users: {}, signals: [] };
   } catch (error) {
     console.error(`Exceção ao recuperar sala ${roomId}:`, error);
@@ -39,12 +44,14 @@ async function saveRoomData(roomId, data) {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 86400 * 1000); // 24 horas depois
     
+    console.log(`[Supabase] Verificando se sala ${roomId} existe`);
     // Verificar se a sala já existe
     const checkResponse = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?room_id=eq.${encodeURIComponent(roomId)}&select=id`, {
       method: 'GET',
       headers: {
         'apikey': SUPABASE_KEY,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_KEY}`
       }
     });
     
@@ -67,17 +74,20 @@ async function saveRoomData(roomId, data) {
     
     if (roomExists) {
       // Atualizar sala existente
+      console.log(`[Supabase] Atualizando sala existente ${roomId}`);
       response = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?room_id=eq.${encodeURIComponent(roomId)}`, {
         method: 'PATCH',
         headers: {
           'apikey': SUPABASE_KEY,
           'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
+          'Prefer': 'return=minimal',
+          'Authorization': `Bearer ${SUPABASE_KEY}`
         },
         body: JSON.stringify(roomData)
       });
     } else {
       // Criar nova sala
+      console.log(`[Supabase] Criando nova sala ${roomId}`);
       roomData.room_id = roomId;
       roomData.created_at = now.toISOString();
       
@@ -86,7 +96,8 @@ async function saveRoomData(roomId, data) {
         headers: {
           'apikey': SUPABASE_KEY,
           'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
+          'Prefer': 'return=minimal',
+          'Authorization': `Bearer ${SUPABASE_KEY}`
         },
         body: JSON.stringify(roomData)
       });
@@ -110,7 +121,8 @@ async function cleanupRooms() {
       headers: {
         'apikey': SUPABASE_KEY,
         'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
+        'Prefer': 'return=minimal',
+        'Authorization': `Bearer ${SUPABASE_KEY}`
       }
     });
     
@@ -390,15 +402,21 @@ async function handleRequest(request) {
     try {
       // Obter todas as salas ativas do Supabase
       const now = new Date().toISOString();
+      console.log(`[Supabase STATUS] Verificando salas ativas em ${SUPABASE_URL}`);
+      
       const response = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?select=room_id,room_data&expires_at=gt.${encodeURIComponent(now)}`, {
         method: 'GET',
         headers: {
           'apikey': SUPABASE_KEY,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${SUPABASE_KEY}`
         }
       });
       
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Erro ao obter salas: ${response.status} ${response.statusText}`);
+        console.error(`Detalhes: ${errorText}`);
         throw new Error(`Erro ao obter salas: ${response.status} ${response.statusText}`);
       }
       
@@ -471,6 +489,66 @@ async function handleRequest(request) {
       return new Response(JSON.stringify({
         success: false,
         error: "Erro durante a limpeza"
+      }), {
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json'
+        },
+        status: 500
+      });
+    }
+  }
+  
+  // Endpoint para verificar se a tabela existe
+  if (url.pathname === '/tablestatus') {
+    try {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?select=count()`, {
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'Prefer': 'count=exact'
+        }
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        return new Response(JSON.stringify({
+          success: false,
+          error: `Erro ao acessar a tabela: ${response.status} ${response.statusText}`,
+          details: errorText
+        }), {
+          headers: {
+            ...headers,
+            'Content-Type': 'application/json'
+          },
+          status: 500
+        });
+      }
+      
+      const data = await response.json();
+      return new Response(JSON.stringify({
+        success: true,
+        message: "Tabela webrtc_rooms encontrada",
+        count: data.count || 0,
+        supabaseUrl: SUPABASE_URL,
+        headers: {
+          accept: response.headers.get('accept'),
+          contentType: response.headers.get('content-type')
+        }
+      }), {
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json'
+        }
+      });
+    } catch (error) {
+      console.error('Erro ao verificar tabela:', error);
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Erro ao verificar tabela',
+        message: error.message
       }), {
         headers: {
           ...headers,

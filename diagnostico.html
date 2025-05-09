@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagnóstico WebRTC</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .diagnostic-container {
+            max-width: 800px;
+            margin: 30px auto;
+            padding: 20px;
+            background-color: #fff;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            border-radius: 8px;
+        }
+        
+        .status-item {
+            border-left: 4px solid #ccc;
+            padding: 10px 15px;
+            margin: 10px 0;
+        }
+        
+        .status-success {
+            border-left-color: #28a745;
+            background-color: rgba(40, 167, 69, 0.1);
+        }
+        
+        .status-warning {
+            border-left-color: #ffc107;
+            background-color: rgba(255, 193, 7, 0.1);
+        }
+        
+        .status-error {
+            border-left-color: #dc3545;
+            background-color: rgba(220, 53, 69, 0.1);
+        }
+        
+        .status-pending {
+            border-left-color: #6c757d;
+            background-color: rgba(108, 117, 125, 0.1);
+        }
+        
+        .test-group {
+            margin-bottom: 30px;
+        }
+        
+        .test-group h2 {
+            font-size: 1.4rem;
+            margin-bottom: 15px;
+        }
+        
+        .details-box {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 14px;
+            overflow-x: auto;
+        }
+        
+        .action-buttons {
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="diagnostic-container">
+        <div class="d-flex justify-content-between align-items-center">
+            <h1>Diagnóstico WebRTC</h1>
+            <a href="index.html" class="btn btn-outline-primary btn-sm">Voltar</a>
+        </div>
+        
+        <div class="action-buttons">
+            <button id="run-all-tests" class="btn btn-primary">Executar todos os testes</button>
+            <button id="clear-results" class="btn btn-outline-secondary">Limpar resultados</button>
+        </div>
+        
+        <div class="test-group">
+            <h2>1. Navegador e WebRTC</h2>
+            <div id="browser-check" class="status-item status-pending">Verificando compatibilidade do navegador...</div>
+            <div id="device-access" class="status-item status-pending">Verificando acesso aos dispositivos (câmera/microfone)...</div>
+        </div>
+        
+        <div class="test-group">
+            <h2>2. Servidor de Sinalização</h2>
+            <div id="server-access" class="status-item status-pending">Verificando acesso ao servidor de sinalização...</div>
+            <div id="server-status" class="status-item status-pending">Verificando status do servidor...</div>
+        </div>
+        
+        <div class="test-group">
+            <h2>3. Banco de Dados (Supabase)</h2>
+            <div id="db-access" class="status-item status-pending">Verificando acesso ao banco de dados...</div>
+            <div id="db-table" class="status-item status-pending">Verificando tabela webrtc_rooms...</div>
+        </div>
+        
+        <div class="test-group">
+            <h2>4. Detalhes</h2>
+            <div id="details" class="details-box">
+                Clique em "Executar todos os testes" para ver os detalhes...
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { runSetupCheck, checkTableStatus, checkSignalServerStatus } from './setup-check.js';
+        
+        const SIGNALING_SERVER = 'https://webrtc-signaling.mosaicoworkers.workers.dev';
+        
+        // Status elements
+        const browserCheck = document.getElementById('browser-check');
+        const deviceAccess = document.getElementById('device-access');
+        const serverAccess = document.getElementById('server-access');
+        const serverStatus = document.getElementById('server-status');
+        const dbAccess = document.getElementById('db-access');
+        const dbTable = document.getElementById('db-table');
+        const details = document.getElementById('details');
+        
+        // Buttons
+        document.getElementById('run-all-tests').addEventListener('click', runAllTests);
+        document.getElementById('clear-results').addEventListener('click', clearResults);
+        
+        // Set status with styling
+        function setStatus(element, status, message) {
+            element.textContent = message;
+            element.className = 'status-item';
+            
+            switch(status) {
+                case 'success':
+                    element.classList.add('status-success');
+                    break;
+                case 'warning':
+                    element.classList.add('status-warning');
+                    break;
+                case 'error':
+                    element.classList.add('status-error');
+                    break;
+                default:
+                    element.classList.add('status-pending');
+            }
+        }
+        
+        // Initialize with pending status
+        function resetStatus() {
+            setStatus(browserCheck, 'pending', 'Verificando compatibilidade do navegador...');
+            setStatus(deviceAccess, 'pending', 'Verificando acesso aos dispositivos (câmera/microfone)...');
+            setStatus(serverAccess, 'pending', 'Verificando acesso ao servidor de sinalização...');
+            setStatus(serverStatus, 'pending', 'Verificando status do servidor...');
+            setStatus(dbAccess, 'pending', 'Verificando acesso ao banco de dados...');
+            setStatus(dbTable, 'pending', 'Verificando tabela webrtc_rooms...');
+        }
+        
+        // Clear all results
+        function clearResults() {
+            resetStatus();
+            details.textContent = 'Clique em "Executar todos os testes" para ver os detalhes...';
+        }
+        
+        // Append detail information
+        function appendDetail(message) {
+            if (details.textContent === 'Clique em "Executar todos os testes" para ver os detalhes...') {
+                details.textContent = '';
+            }
+            
+            const timestamp = new Date().toLocaleTimeString();
+            details.textContent += `[${timestamp}] ${message}\n`;
+            details.scrollTop = details.scrollHeight;
+        }
+        
+        // Check browser compatibility
+        async function checkBrowserCompatibility() {
+            appendDetail('Verificando compatibilidade do navegador...');
+            
+            const features = {
+                rtcPeerConnection: 'RTCPeerConnection' in window,
+                getUserMedia: 'mediaDevices' in navigator && 'getUserMedia' in navigator.mediaDevices,
+                rtcDataChannel: 'RTCDataChannel' in window
+            };
+            
+            const allSupported = Object.values(features).every(f => f === true);
+            
+            if (allSupported) {
+                setStatus(browserCheck, 'success', '✅ Navegador compatível com WebRTC');
+                appendDetail('✅ Navegador suporta todas as APIs WebRTC necessárias');
+            } else {
+                setStatus(browserCheck, 'error', '❌ Navegador não totalmente compatível com WebRTC');
+                appendDetail('❌ Navegador não suporta todas as APIs WebRTC necessárias:');
+                
+                if (!features.rtcPeerConnection) appendDetail('  - RTCPeerConnection não suportado');
+                if (!features.getUserMedia) appendDetail('  - getUserMedia não suportado');
+                if (!features.rtcDataChannel) appendDetail('  - RTCDataChannel não suportado');
+            }
+            
+            return allSupported;
+        }
+        
+        // Check device access
+        async function checkDeviceAccess() {
+            appendDetail('Verificando acesso aos dispositivos de mídia...');
+            
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const hasCamera = devices.some(device => device.kind === 'videoinput');
+                const hasMicrophone = devices.some(device => device.kind === 'audioinput');
+                
+                if (hasCamera && hasMicrophone) {
+                    setStatus(deviceAccess, 'success', '✅ Câmera e microfone disponíveis');
+                    appendDetail(`✅ Dispositivos encontrados: ${devices.length} total`);
+                    appendDetail(`  - Câmeras: ${devices.filter(d => d.kind === 'videoinput').length}`);
+                    appendDetail(`  - Microfones: ${devices.filter(d => d.kind === 'audioinput').length}`);
+                } else {
+                    const missing = [];
+                    if (!hasCamera) missing.push('câmera');
+                    if (!hasMicrophone) missing.push('microfone');
+                    
+                    setStatus(deviceAccess, 'warning', `⚠️ Falta acesso a ${missing.join(' e ')}`);
+                    appendDetail(`⚠️ Dispositivos faltando: ${missing.join(', ')}`);
+                }
+                
+                return true;
+            } catch (error) {
+                setStatus(deviceAccess, 'error', '❌ Erro ao acessar dispositivos');
+                appendDetail(`❌ Erro ao acessar dispositivos: ${error.message}`);
+                return false;
+            }
+        }
+        
+        // Check signaling server access
+        async function checkServerAccessibility() {
+            appendDetail('Verificando acesso ao servidor de sinalização...');
+            
+            try {
+                const startTime = performance.now();
+                const response = await fetch(`${SIGNALING_SERVER}/status`, { 
+                    method: 'HEAD',
+                    cache: 'no-store' 
+                });
+                const endTime = performance.now();
+                const latency = Math.round(endTime - startTime);
+                
+                if (response.ok) {
+                    setStatus(serverAccess, 'success', `✅ Servidor acessível (${latency}ms)`);
+                    appendDetail(`✅ Servidor de sinalização acessível com latência de ${latency}ms`);
+                    return true;
+                } else {
+                    setStatus(serverAccess, 'error', `❌ Resposta com erro: ${response.status}`);
+                    appendDetail(`❌ Servidor respondeu com status ${response.status} ${response.statusText}`);
+                    return false;
+                }
+            } catch (error) {
+                setStatus(serverAccess, 'error', '❌ Servidor inacessível');
+                appendDetail(`❌ Erro ao acessar servidor: ${error.message}`);
+                return false;
+            }
+        }
+        
+        // Check server status
+        async function checkServerStatus() {
+            appendDetail('Verificando status do servidor de sinalização...');
+            
+            try {
+                const response = await fetch(`${SIGNALING_SERVER}/status`);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        setStatus(serverStatus, 'success', `✅ Servidor online com ${data.stats.rooms} salas`);
+                        appendDetail(`✅ Status do servidor: Online`);
+                        appendDetail(`  - Salas ativas: ${data.stats.rooms}`);
+                        appendDetail(`  - Usuários totais: ${data.stats.totalUsers}`);
+                        return true;
+                    } else {
+                        setStatus(serverStatus, 'warning', '⚠️ Resposta anormal do servidor');
+                        appendDetail(`⚠️ Servidor retornou resposta anormal: ${JSON.stringify(data)}`);
+                        return false;
+                    }
+                } else {
+                    setStatus(serverStatus, 'error', `❌ Erro ao verificar status: ${response.status}`);
+                    appendDetail(`❌ Erro ao verificar status do servidor: ${response.status} ${response.statusText}`);
+                    return false;
+                }
+            } catch (error) {
+                setStatus(serverStatus, 'error', '❌ Erro ao verificar status do servidor');
+                appendDetail(`❌ Erro ao verificar status do servidor: ${error.message}`);
+                return false;
+            }
+        }
+        
+        // Check database access
+        async function checkDatabaseAccess() {
+            appendDetail('Verificando acesso ao banco de dados Supabase...');
+            
+            try {
+                const response = await fetch(`${SIGNALING_SERVER}/tablestatus`);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        setStatus(dbAccess, 'success', '✅ Banco de dados acessível');
+                        appendDetail(`✅ Banco de dados Supabase acessível: ${data.supabaseUrl}`);
+                        return true;
+                    } else {
+                        setStatus(dbAccess, 'error', `❌ Erro de acesso: ${data.error}`);
+                        appendDetail(`❌ Erro ao acessar banco de dados: ${data.error}`);
+                        appendDetail(`  Detalhes: ${data.details || 'Sem detalhes adicionais'}`);
+                        return false;
+                    }
+                } else {
+                    setStatus(dbAccess, 'error', `❌ Erro na API: ${response.status}`);
+                    appendDetail(`❌ Erro na API ao verificar banco: ${response.status} ${response.statusText}`);
+                    return false;
+                }
+            } catch (error) {
+                setStatus(dbAccess, 'error', '❌ Erro ao verificar banco');
+                appendDetail(`❌ Erro ao verificar banco de dados: ${error.message}`);
+                return false;
+            }
+        }
+        
+        // Check database table
+        async function checkDatabaseTable() {
+            appendDetail('Verificando tabela webrtc_rooms...');
+            
+            try {
+                const response = await fetch(`${SIGNALING_SERVER}/tablestatus`);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        setStatus(dbTable, 'success', `✅ Tabela OK: ${data.count} salas`);
+                        appendDetail(`✅ Tabela webrtc_rooms encontrada`);
+                        appendDetail(`  - Número de salas registradas: ${data.count}`);
+                        return true;
+                    } else {
+                        setStatus(dbTable, 'error', '❌ Erro ao verificar tabela');
+                        appendDetail(`❌ Erro ao verificar tabela: ${data.error}`);
+                        return false;
+                    }
+                } else {
+                    setStatus(dbTable, 'error', `❌ Erro na API: ${response.status}`);
+                    appendDetail(`❌ Erro na API ao verificar tabela: ${response.status} ${response.statusText}`);
+                    return false;
+                }
+            } catch (error) {
+                setStatus(dbTable, 'error', '❌ Erro ao verificar tabela');
+                appendDetail(`❌ Erro ao verificar tabela: ${error.message}`);
+                return false;
+            }
+        }
+        
+        // Run all tests
+        async function runAllTests() {
+            // Reset status
+            resetStatus();
+            
+            // Clear details
+            details.textContent = '';
+            
+            appendDetail('Iniciando diagnóstico completo...');
+            appendDetail(`Hora de início: ${new Date().toLocaleTimeString()}`);
+            appendDetail(`Navegador: ${navigator.userAgent}`);
+            appendDetail('-------------------------------------');
+            
+            // Run all tests in sequence
+            await checkBrowserCompatibility();
+            await checkDeviceAccess();
+            await checkServerAccessibility();
+            await checkServerStatus();
+            await checkDatabaseAccess();
+            await checkDatabaseTable();
+            
+            appendDetail('-------------------------------------');
+            appendDetail(`Diagnóstico concluído: ${new Date().toLocaleTimeString()}`);
+        }
+        
+        // Run basic checks on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            checkBrowserCompatibility();
+        });
+    </script>
+</body>
+</html>

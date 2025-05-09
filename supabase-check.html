@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verificador de Conexão Supabase</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2d3748;
+        }
+        button {
+            background-color: #4299e1;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        button:hover {
+            background-color: #3182ce;
+        }
+        pre {
+            background-color: #f8f8f8;
+            padding: 15px;
+            border-radius: 4px;
+            overflow: auto;
+        }
+        .error {
+            color: #e53e3e;
+        }
+        .success {
+            color: #38a169;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Verificador de Conexão Supabase</h1>
+        
+        <button id="checkTable">Verificar Tabela</button>
+        <button id="checkStatus">Verificar Status</button>
+        <button id="runCleanup">Executar Limpeza</button>
+        
+        <h2>Resultados:</h2>
+        <div id="results">
+            <p>Clique em um dos botões acima para testar a conexão.</p>
+        </div>
+    </div>
+
+    <script>
+        const SIGNALING_SERVER = 'https://webrtc-signaling.mosaicoworkers.workers.dev';
+        
+        function displayResult(data, isError = false) {
+            const resultsDiv = document.getElementById('results');
+            const pre = document.createElement('pre');
+            pre.className = isError ? 'error' : 'success';
+            pre.textContent = typeof data === 'object' ? JSON.stringify(data, null, 2) : data;
+            
+            // Adicionar timestamp
+            const timestamp = document.createElement('p');
+            timestamp.textContent = `${new Date().toLocaleTimeString()}`;
+            
+            resultsDiv.innerHTML = '';
+            resultsDiv.appendChild(timestamp);
+            resultsDiv.appendChild(pre);
+        }
+        
+        document.getElementById('checkTable').addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${SIGNALING_SERVER}/tablestatus`);
+                const data = await response.json();
+                displayResult(data, !data.success);
+            } catch (error) {
+                displayResult(`Erro ao verificar tabela: ${error.message}`, true);
+            }
+        });
+        
+        document.getElementById('checkStatus').addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${SIGNALING_SERVER}/status`);
+                const data = await response.json();
+                displayResult(data, !data.success);
+            } catch (error) {
+                displayResult(`Erro ao verificar status: ${error.message}`, true);
+            }
+        });
+        
+        document.getElementById('runCleanup').addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${SIGNALING_SERVER}/cleanup?key=seu-token-secreto`);
+                const data = await response.json();
+                displayResult(data, !data.success);
+            } catch (error) {
+                displayResult(`Erro ao executar limpeza: ${error.message}`, true);
+            }
+        });
+    </script>
+</body>
+</html>

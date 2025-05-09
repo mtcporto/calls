@@ -41,12 +41,29 @@ const configuration = {
 // URL do servidor de sinalização (Cloudflare Worker)
 const SIGNALING_SERVER = 'https://webrtc-signaling.mosaicoworkers.workers.dev'; // URL do servidor de sinalização (sem a barra no final)
 
+// Verificar servidor de sinalização no console
+console.log(`[WebRTC] Usando servidor de sinalização: ${SIGNALING_SERVER}`);
+
 // Variáveis globais
 let peerConnections = {}; // Armazena conexões peer
 let localStream;
 let roomId;
 let userId;
 let username;
+
+// Verificar acesso inicial ao servidor
+(async function checkServerAccess() {
+  try {
+    const response = await fetch(`${SIGNALING_SERVER}/status`);
+    if (response.ok) {
+      console.log('[WebRTC] Servidor de sinalização respondendo corretamente');
+    } else {
+      console.warn('[WebRTC] Servidor de sinalização respondendo com erro:', await response.text());
+    }
+  } catch (e) {
+    console.error('[WebRTC] Erro ao conectar ao servidor de sinalização:', e.message);
+  }
+})();
 let isPolling = false;
 let lastPollTime = 0;
 let makingOffer = {}; // Flag para controlar ofertas em andamento por peerId
@@ -79,6 +96,7 @@ export async function connectToRoom(room, stream, addRemoteVideo) {
   
   // Registrar na sala
   try {
+    console.log(`[WebRTC] Enviando solicitação para ${SIGNALING_SERVER}/join`);
     const response = await fetch(`${SIGNALING_SERVER}/join`, {
       method: 'POST',
       headers: {
@@ -86,6 +104,10 @@ export async function connectToRoom(room, stream, addRemoteVideo) {
       },
       body: JSON.stringify({ room: roomId, id: userId, name: username })
     });
+    
+    if (!response.ok) {
+      throw new Error(`Erro na resposta do servidor: ${response.status} ${response.statusText}`);
+    }
     
     const data = await response.json();
     
