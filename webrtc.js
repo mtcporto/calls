@@ -38,6 +38,9 @@ const configuration = {
   iceTransportPolicy: 'all' // usar 'relay' se quiser forçar TURN
 };
 
+// Importar as funções de diagnóstico de conexões
+import { diagnoseConnections, repairConnections, verifyVideoTracks } from './connection-fix.js';
+
 // URL do servidor de sinalização (Cloudflare Worker)
 const SIGNALING_SERVER = 'https://webrtc-signaling.mosaicoworkers.workers.dev'; // URL do servidor de sinalização (sem a barra no final)
 
