@@ -135,8 +135,15 @@ export {
 };
 
 // Executar verificação ao carregar em modo standalone
-if (typeof window !== 'undefined' && document.currentScript.getAttribute('data-run-check') === 'true') {
-  document.addEventListener('DOMContentLoaded', () => {
-    runSetupCheck();
-  });
+// Corrigido para não depender de document.currentScript que pode ser null
+if (typeof window !== 'undefined') {
+  // Verificar se está sendo executado como módulo principal
+  const isMainModule = document?.currentScript?.getAttribute('data-run-check') === 'true';
+  
+  if (isMainModule) {
+    document.addEventListener('DOMContentLoaded', () => {
+      console.log('Executando verificação automática do ambiente...');
+      runSetupCheck();
+    });
+  }
 }

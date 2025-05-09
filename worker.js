@@ -502,13 +502,13 @@ async function handleRequest(request) {
   // Endpoint para verificar se a tabela existe
   if (url.pathname === '/tablestatus') {
     try {
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?select=count()`, {
+      // Alterado para não usar função agregadora que não é permitida pela API
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?select=id&limit=1`, {
         method: 'GET',
         headers: {
           'apikey': SUPABASE_KEY,
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${SUPABASE_KEY}`,
-          'Prefer': 'count=exact'
+          'Authorization': `Bearer ${SUPABASE_KEY}`
         }
       });
       
@@ -527,11 +527,23 @@ async function handleRequest(request) {
         });
       }
       
+      // Obter o número total de entradas na tabela separadamente
+      const countResponse = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms`, {
+        method: 'HEAD',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`
+        }
+      });
+      
       const data = await response.json();
+      const tableExists = response.ok;
+      const count = countResponse.ok ? parseInt(countResponse.headers.get('content-range')?.split('/')[1] || '0') : 0;
+      
       return new Response(JSON.stringify({
-        success: true,
-        message: "Tabela webrtc_rooms encontrada",
-        count: data.count || 0,
+        success: tableExists,
+        message: tableExists ? "Tabela webrtc_rooms encontrada" : "Tabela não encontrada ou erro de acesso",
+        count: count,
         supabaseUrl: SUPABASE_URL,
         headers: {
           accept: response.headers.get('accept'),

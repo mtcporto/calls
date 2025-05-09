@@ -48,24 +48,117 @@
         .success {
             color: #38a169;
         }
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .connection-info {
+            background-color: #edf2f7;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .status {
+            font-weight: bold;
+            padding: 3px 8px;
+            border-radius: 3px;
+        }
+        .status-online {
+            background-color: #c6f6d5;
+            color: #2f855a;
+        }
+        .status-error {
+            background-color: #fed7d7;
+            color: #c53030;
+        }
+        .status-unknown {
+            background-color: #e2e8f0;
+            color: #4a5568;
+        }
+        code {
+            background-color: #e2e8f0;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        .special-btn {
+            background-color: #805ad5;
+        }
+        .special-btn:hover {
+            background-color: #6b46c1;
+        }
+        .error-help {
+            background-color: #feebc8;
+            border-left: 4px solid #dd6b20;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Verificador de Conexão Supabase</h1>
         
-        <button id="checkTable">Verificar Tabela</button>
-        <button id="checkStatus">Verificar Status</button>
-        <button id="runCleanup">Executar Limpeza</button>
+        <div class="connection-info">
+            <div class="server-info">
+                <h3>Informações de Conexão</h3>
+                <p>Servidor de Sinalização: <code id="server-url">Verificando...</code></p>
+                <p>Status do Servidor: <span id="server-status" class="status">Não verificado</span></p>
+            </div>
+        </div>
+        
+        <div class="actions">
+            <button id="checkTable">Verificar Tabela</button>
+            <button id="checkStatus">Verificar Status</button>
+            <button id="runCleanup">Executar Limpeza</button>
+            <button id="createTestRoom" class="special-btn">Criar Sala de Teste</button>
+        </div>
         
         <h2>Resultados:</h2>
         <div id="results">
             <p>Clique em um dos botões acima para testar a conexão.</p>
         </div>
+        
+        <div class="error-help" id="errorHelp" style="display: none;">
+            <h3>Ajuda para Resolução de Problemas</h3>
+            <p id="errorHelpText"></p>
+        </div>
     </div>
 
     <script>
         const SIGNALING_SERVER = 'https://webrtc-signaling.mosaicoworkers.workers.dev';
+        
+        // Inicialização
+        document.addEventListener('DOMContentLoaded', () => {
+            // Exibir URL do servidor
+            document.getElementById('server-url').textContent = SIGNALING_SERVER;
+            
+            // Verificar status inicial
+            checkInitialStatus();
+        });
+        
+        async function checkInitialStatus() {
+            try {
+                const response = await fetch(`${SIGNALING_SERVER}/status`, { method: 'HEAD' });
+                
+                if (response.ok) {
+                    updateServerStatus('Online', 'status-online');
+                } else {
+                    updateServerStatus('Erro: ' + response.status, 'status-error');
+                }
+            } catch (error) {
+                updateServerStatus('Offline', 'status-error');
+            }
+        }
+        
+        function updateServerStatus(text, className) {
+            const statusElement = document.getElementById('server-status');
+            statusElement.textContent = text;
+            statusElement.className = 'status ' + className;
+        }
         
         function displayResult(data, isError = false) {
             const resultsDiv = document.getElementById('results');
@@ -80,6 +173,36 @@
             resultsDiv.innerHTML = '';
             resultsDiv.appendChild(timestamp);
             resultsDiv.appendChild(pre);
+            
+            // Mostrar ajuda para erros específicos
+            const errorHelp = document.getElementById('errorHelp');
+            const errorHelpText = document.getElementById('errorHelpText');
+            
+            if (isError) {
+                // Tentar identificar o erro
+                errorHelp.style.display = 'block';
+                
+                if (typeof data === 'object' && data.details && data.details.includes('PGRST123')) {
+                    errorHelpText.innerHTML = `
+                        <p>O erro <strong>"Use of aggregate functions is not allowed"</strong> indica que o PostgREST (que o Supabase usa) não está permitindo funções de agregação como <code>count()</code>.</p>
+                        <p><strong>Solução:</strong> Atualize o worker.js para usar uma abordagem diferente para verificar a existência da tabela, sem usar funções agregadoras.</p>
+                    `;
+                } else if (data.includes('Failed to fetch') || data.includes('NetworkError')) {
+                    errorHelpText.innerHTML = `
+                        <p>Erro de conexão com o servidor. Possíveis causas:</p>
+                        <ul>
+                            <li>Servidor offline ou inacessível</li>
+                            <li>CORS bloqueando a requisição</li>
+                            <li>Problemas de rede</li>
+                        </ul>
+                        <p><strong>Solução:</strong> Verifique se o servidor está online e se as configurações de CORS estão corretas.</p>
+                    `;
+                } else {
+                    errorHelp.style.display = 'none';
+                }
+            } else {
+                errorHelp.style.display = 'none';
+            }
         }
         
         document.getElementById('checkTable').addEventListener('click', async () => {
@@ -111,6 +234,79 @@
                 displayResult(`Erro ao executar limpeza: ${error.message}`, true);
             }
         });
+        
+        // Botão para criar sala de teste
+        document.getElementById('createTestRoom').addEventListener('click', async () => {
+            try {
+                // Gerar código de sala aleatório
+                const roomId = generateRandomRoomId();
+                
+                // Criar sala de teste diretamente via API
+                const testData = {
+                    users: {
+                        "test-user-1": {
+                            id: "test-user-1",
+                            name: "Usuário de Teste",
+                            timestamp: Date.now()
+                        }
+                    },
+                    signals: []
+                };
+                
+                // Enviar para o endpoint join (que cria a sala implicitamente)
+                const response = await fetch(`${SIGNALING_SERVER}/join`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        room: roomId,
+                        id: "test-user-1",
+                        name: "Usuário de Teste"
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayResult({
+                        success: true,
+                        message: `Sala de teste criada com sucesso`,
+                        roomId: roomId,
+                        response: data
+                    });
+                } else {
+                    displayResult({
+                        success: false,
+                        message: `Falha ao criar sala de teste`,
+                        roomId: roomId,
+                        response: data
+                    }, true);
+                }
+            } catch (error) {
+                displayResult(`Erro ao criar sala de teste: ${error.message}`, true);
+            }
+        });
+        
+        // Função para gerar ID de sala aleatório
+        function generateRandomRoomId() {
+            const chars = 'abcdefghijklmnopqrstuvwxyz';
+            let code = '';
+            
+            for (let i = 0; i < 3; i++) {
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            code += '-';
+            for (let i = 0; i < 4; i++) {
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            code += '-';
+            for (let i = 0; i < 3; i++) {
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            
+            return code;
+        }
     </script>
 </body>
 </html>
