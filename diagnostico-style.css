@@ -1,0 +1,77 @@
+/* Estilos para a página de diagnóstico */
+.diagnostic-container {
+    max-width: 800px;
+    margin: 30px auto;
+    padding: 20px;
+    background-color: #fff;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    border-radius: 8px;
+}
+
+.status-item {
+    border-left: 4px solid #ccc;
+    padding: 10px 15px;
+    margin: 10px 0;
+}
+
+.status-success {
+    border-left-color: #28a745;
+    background-color: rgba(40, 167, 69, 0.1);
+}
+
+.status-warning {
+    border-left-color: #ffc107;
+    background-color: rgba(255, 193, 7, 0.1);
+}
+
+.status-error {
+    border-left-color: #dc3545;
+    background-color: rgba(220, 53, 69, 0.1);
+}
+
+.status-pending {
+    border-left-color: #6c757d;
+    background-color: rgba(108, 117, 125, 0.1);
+}
+
+.test-group {
+    margin-bottom: 30px;
+}
+
+.test-group h2 {
+    font-size: 1.4rem;
+    margin-bottom: 15px;
+    color: #000; /* Texto sempre em preto */
+}
+
+.details-box {
+    background-color: #f8f9fa;
+    padding: 10px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 14px;
+    overflow-x: auto;
+    color: #000; /* Texto sempre em preto */
+}
+
+.action-buttons {
+    margin: 20px 0;
+}
+
+/* Garantir que todos os textos sejam pretos */
+body, p, h1, h2, h3, div, span, .status-item {
+    color: #000 !important;
+}
+
+/* Exceções para mensagens específicas */
+.status-success {
+    color: #28a745 !important;
+}
+
+.status-warning {
+    color: #ffc107 !important;
+}
+
+.status-error {
+    color: #dc3545 !important;
+}

@@ -46,7 +46,7 @@ async function saveRoomData(roomId, data) {
     
     console.log(`[Supabase] Verificando se sala ${roomId} existe`);
     // Verificar se a sala já existe
-    const checkResponse = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?room_id=eq.${encodeURIComponent(roomId)}&select=id`, {
+    const checkResponse = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?room_id=eq.${encodeURIComponent(roomId)}&select=room_id`, {
       method: 'GET',
       headers: {
         'apikey': SUPABASE_KEY,
@@ -502,8 +502,8 @@ async function handleRequest(request) {
   // Endpoint para verificar se a tabela existe
   if (url.pathname === '/tablestatus') {
     try {
-      // Alterado para não usar função agregadora que não é permitida pela API
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?select=id&limit=1`, {
+      // Alterado para usar room_id em vez de id, já que é essa a coluna existente na tabela
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?select=room_id&limit=1`, {
         method: 'GET',
         headers: {
           'apikey': SUPABASE_KEY,
@@ -528,17 +528,30 @@ async function handleRequest(request) {
       }
       
       // Obter o número total de entradas na tabela separadamente
-      const countResponse = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms`, {
-        method: 'HEAD',
+      const countResponse = await fetch(`${SUPABASE_URL}/rest/v1/webrtc_rooms?select=room_id`, {
+        method: 'GET',
         headers: {
           'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${SUPABASE_KEY}`
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'Prefer': 'count=exact'
         }
       });
       
       const data = await response.json();
       const tableExists = response.ok;
-      const count = countResponse.ok ? parseInt(countResponse.headers.get('content-range')?.split('/')[1] || '0') : 0;
+      // Tentativa de obter número de registros
+      let count = 0;
+      if (countResponse.ok) {
+        // Tentar obter o count do header content-range primeiro
+        const contentRange = countResponse.headers.get('content-range');
+        if (contentRange && contentRange.includes('/')) {
+          count = parseInt(contentRange.split('/')[1] || '0');
+        } else {
+          // Caso contrário, contar a partir dos dados retornados
+          const countData = await countResponse.json();
+          count = Array.isArray(countData) ? countData.length : 0;
+        }
+      }
       
       return new Response(JSON.stringify({
         success: tableExists,

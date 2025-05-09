@@ -6,7 +6,9 @@
     <title>Diagnóstico WebRTC</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="diagnostico-style.css">
     <style>
+        /* Estilos movidos para diagnostico-style.css */
         .diagnostic-container {
             max-width: 800px;
             margin: 30px auto;
@@ -166,6 +168,9 @@
             const timestamp = new Date().toLocaleTimeString();
             details.textContent += `[${timestamp}] ${message}\n`;
             details.scrollTop = details.scrollHeight;
+            
+            // Garantir que o texto seja visível (preto)
+            details.style.color = '#000';
         }
         
         // Check browser compatibility

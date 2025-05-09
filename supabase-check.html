@@ -48,6 +48,10 @@
         .success {
             color: #38a169;
         }
+        /* Garantir que todo texto seja legível */
+        body, p, h1, h2, h3, div {
+            color: #000;
+        }
         .actions {
             display: flex;
             flex-wrap: wrap;
@@ -169,6 +173,7 @@
             // Adicionar timestamp
             const timestamp = document.createElement('p');
             timestamp.textContent = `${new Date().toLocaleTimeString()}`;
+            timestamp.style.color = '#000'; // Garantir que o timestamp seja visível
             
             resultsDiv.innerHTML = '';
             resultsDiv.appendChild(timestamp);
