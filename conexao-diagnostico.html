@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagnóstico WebRTC em Tempo Real</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f4f8;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #4285f4;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #3367d6;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 10px 0;
+            background: #f9f9f9;
+        }
+        .error {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+        .success {
+            color: #388e3c;
+            font-weight: bold;
+        }
+        pre {
+            background: #eee;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .actions {
+            margin: 20px 0;
+        }
+        #connection-status {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .status-connected {
+            background-color: #c8e6c9;
+            border: 1px solid #81c784;
+        }
+        .status-disconnected {
+            background-color: #ffcdd2;
+            border: 1px solid #e57373;
+        }
+        .connection-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Diagnóstico WebRTC em Tempo Real</h1>
+        
+        <div id="connection-status" class="status-disconnected">
+            <h2>Status: <span id="status-text">Desconectado</span></h2>
+            <div>Sala: <span id="room-id">-</span></div>
+            <div>Seu ID: <span id="user-id">-</span></div>
+            <div>Usuários conectados: <span id="connected-users">0</span></div>
+        </div>
+        
+        <div class="actions">
+            <button id="diagnose-btn">Executar Diagnóstico</button>
+            <button id="repair-btn">Reparar Conexões</button>
+            <button id="check-video-btn">Verificar Streams de Vídeo</button>
+        </div>
+
+        <h2>Conexões P2P</h2>
+        <div id="connections-container"></div>
+        
+        <h2>Log de Diagnóstico</h2>
+        <pre id="diagnostics-log"></pre>
+    </div>
+
+    <script type="module">
+        import { diagnoseConnections, repairConnections, verifyVideoTracks } from './connection-fix.js';
+        import * as WebRTC from './webrtc.js';
+        
+        // Elements
+        const diagnoseBtn = document.getElementById('diagnose-btn');
+        const repairBtn = document.getElementById('repair-btn');
+        const checkVideoBtn = document.getElementById('check-video-btn');
+        const connectionsContainer = document.getElementById('connections-container');
+        const diagnosticsLog = document.getElementById('diagnostics-log');
+        const statusText = document.getElementById('status-text');
+        const roomIdElement = document.getElementById('room-id');
+        const userIdElement = document.getElementById('user-id');
+        const connectedUsersElement = document.getElementById('connected-users');
+        const connectionStatus = document.getElementById('connection-status');
+        
+        // Add to log
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            diagnosticsLog.textContent += `[${timestamp}] ${message}\n`;
+            diagnosticsLog.scrollTop = diagnosticsLog.scrollHeight;
+        }
+        
+        // Get WebRTC debug info
+        function updateConnectionStatus() {
+            const debugInfo = WebRTC.getDebugInfo();
+            
+            if (debugInfo) {
+                roomIdElement.textContent = debugInfo.roomId || '-';
+                userIdElement.textContent = debugInfo.userId || '-';
+                
+                const connectionCount = Object.keys(debugInfo.connections).length;
+                connectedUsersElement.textContent = connectionCount.toString();
+                
+                if (connectionCount > 0) {
+                    statusText.textContent = 'Conectado';
+                    connectionStatus.className = 'status-connected';
+                } else {
+                    statusText.textContent = 'Sem conexões P2P';
+                    connectionStatus.className = 'status-disconnected';
+                }
+                
+                // Update connections display
+                connectionsContainer.innerHTML = '';
+                
+                Object.entries(debugInfo.connections).forEach(([peerId, conn]) => {
+                    const card = document.createElement('div');
+                    card.className = 'card';
+                    
+                    const connectionState = conn.connectionState || conn.iceConnectionState;
+                    const isConnected = connectionState === 'connected' || connectionState === 'completed';
+                    
+                    card.innerHTML = `
+                        <h3>Peer: ${peerId}</h3>
+                        <div class="connection-details">
+                            <div>Estado ICE: <span class="${isConnected ? 'success' : 'error'}">${conn.iceConnectionState || 'N/A'}</span></div>
+                            <div>Estado conexão: <span class="${isConnected ? 'success' : 'error'}">${conn.connectionState || 'N/A'}</span></div>
+                            <div>Estado sinalização: ${conn.signalingState || 'N/A'}</div>
+                            <div>Canal de dados: ${conn.dataChannelReadyState || 'N/A'}</div>
+                        </div>
+                        <button class="restart-btn" data-peer="${peerId}">Reiniciar conexão</button>
+                    `;
+                    
+                    connectionsContainer.appendChild(card);
+                });
+                
+                // Add event listeners to restart buttons
+                document.querySelectorAll('.restart-btn').forEach(btn => {
+                    btn.addEventListener('click', async () => {
+                        const peerId = btn.dataset.peer;
+                        log(`Reiniciando conexão com ${peerId}...`);
+                        await repairConnections(WebRTC.getPeerConnections(), WebRTC.getUserId());
+                        updateConnectionStatus();
+                    });
+                });
+            }
+        }
+        
+        // Run diagnosis
+        diagnoseBtn.addEventListener('click', () => {
+            log('Executando diagnóstico...');
+            try {
+                diagnoseConnections(WebRTC.getPeerConnections());
+                updateConnectionStatus();
+                log('Diagnóstico concluído. Verifique o console para detalhes.');
+            } catch (e) {
+                log(`Erro no diagnóstico: ${e.message}`);
+                console.error(e);
+            }
+        });
+        
+        // Repair connections
+        repairBtn.addEventListener('click', async () => {
+            log('Tentando reparar conexões...');
+            try {
+                await repairConnections(WebRTC.getPeerConnections(), WebRTC.getUserId());
+                updateConnectionStatus();
+                log('Reparos concluídos. Verifique o console para detalhes.');
+            } catch (e) {
+                log(`Erro no reparo: ${e.message}`);
+                console.error(e);
+            }
+        });
+        
+        // Check video tracks
+        checkVideoBtn.addEventListener('click', () => {
+            log('Verificando streams de vídeo...');
+            try {
+                verifyVideoTracks(WebRTC.getPeerConnections());
+                log('Verificação de vídeo concluída. Verifique o console para detalhes.');
+            } catch (e) {
+                log(`Erro na verificação de vídeo: ${e.message}`);
+                console.error(e);
+            }
+        });
+        
+        // Update status periodically
+        setInterval(updateConnectionStatus, 3000);
+        
+        // Initial update
+        updateConnectionStatus();
+        log('Ferramenta de diagnóstico iniciada. Acesse uma sala para analisar as conexões.');
+    </script>
+</body>
+</html>

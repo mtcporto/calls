@@ -351,10 +351,16 @@ async function handleRequest(request) {
         roomData.signals = [];
       }
       
-      // Buscar sinais pendentes para este usuário
+      // Buscar sinais pendentes para este usuário com mais tolerância
+      // Aumentamos o tempo para 3 minutos (180000ms) para garantir que sinais antigos também sejam capturados
       const pendingSignals = roomData.signals.filter(
-        signal => signal.target === userId && signal.timestamp > lastTimestamp
+        signal => signal.target === userId && signal.timestamp > (lastTimestamp - 180000)
       );
+      
+      console.log(`[POLL] ${pendingSignals.length} sinais pendentes para ${userId} na sala ${roomId}`);
+      if (pendingSignals.length > 0) {
+        console.log(`[POLL DETAIL] Tipos de sinais: ${pendingSignals.map(s => s.type).join(', ')}`);
+      }
       
       // Remover usuários inativos (mais de 2 minutos)
       const usersToRemove = [];

@@ -43,6 +43,7 @@ import { diagnoseConnections, repairConnections, verifyVideoTracks } from './con
 
 // URL do servidor de sinalização (Cloudflare Worker)
 const SIGNALING_SERVER = 'https://webrtc-signaling.mosaicoworkers.workers.dev'; // URL do servidor de sinalização (sem a barra no final)
+console.log('[WebRTC] URL do servidor de sinalização:', SIGNALING_SERVER);
 
 // Verificar servidor de sinalização no console
 console.log(`[WebRTC] Usando servidor de sinalização: ${SIGNALING_SERVER}`);
@@ -194,14 +195,22 @@ async function handleSignal(signal, addRemoteVideo) {
 
   console.log(`[${localIdForLog}] Processando sinal ${type} de ${sender}`);
   
-  if (!peerConnections[sender] && type === 'offer') {
-    console.log(`[${localIdForLog}] Criando nova conexão para ${sender} (${senderName || 'nome desconhecido'}) após receber oferta. Não serei o iniciador.`);
-    createPeerConnection(sender, senderName || null, false, addRemoteVideo); // Não iniciador, pois estamos respondendo a uma oferta
-  } else if (!peerConnections[sender]) {
-    // Para outros tipos de sinais (ex: answer, candidate) se a conexão não existir, pode ser um problema.
-    // No entanto, a lógica de criação de conexão no poll/join deve cobrir a maioria dos casos.
-    // Se for um candidato chegando antes da oferta, ele será armazenado.
-    console.log(`[${localIdForLog}] Conexão com ${sender} não existe ainda, mas recebido sinal ${type}. Será tratada se for candidato ou se oferta criar a conexão.`);
+  // Se não existe conexão com este peer, vamos criá-la - mesmo que não seja uma oferta
+  if (!peerConnections[sender] || !peerConnections[sender].signalingState) {
+    let shouldInitiate = false;
+    
+    if (type === 'offer') {
+      // Se recebemos uma oferta, não somos o iniciador
+      console.log(`[${localIdForLog}] Criando nova conexão para ${sender} (${senderName || 'nome desconhecido'}) após receber oferta. Não serei o iniciador.`);
+      shouldInitiate = false;
+    } else {
+      // Para outros tipos de sinais, determinamos quem inicia baseado no ID
+      shouldInitiate = userId < sender;
+      console.log(`[${localIdForLog}] Criando nova conexão para ${sender} (${senderName || 'nome desconhecido'}). Serei o iniciador: ${shouldInitiate}.`);
+    }
+    
+    // Criar a conexão peer
+    createPeerConnection(sender, senderName || null, shouldInitiate, addRemoteVideo);
   }
   
   const pc = peerConnections[sender];
@@ -736,6 +745,44 @@ export function getDebugInfo() {
     }
   }
   return debugInfo;
+}
+
+// Função para expor as conexões peer para diagnóstico
+export function getPeerConnections() {
+  return peerConnections;
+}
+
+// Função para expor o ID do usuário para diagnóstico
+export function getUserId() {
+  return userId;
+}
+
+// Função para forçar o reprocessamento de sinais pendentes
+export async function reprocessPendingSignals() {
+  console.log(`[${userId}] Reprocessando sinais pendentes`);
+  
+  try {
+    const response = await fetch(`${SIGNALING_SERVER}/poll?room=${roomId}&id=${userId}&last=0`);
+    const data = await response.json();
+    
+    if (data.success && data.signals && data.signals.length > 0) {
+      console.log(`[${userId}] Encontrados ${data.signals.length} sinais pendentes`);
+      
+      // Processar os sinais recebidos
+      for (const signal of data.signals) {
+        await handleSignal(signal);
+      }
+      
+      console.log(`[${userId}] Reprocessamento concluído`);
+      return true;
+    } else {
+      console.log(`[${userId}] Nenhum sinal pendente encontrado`);
+      return false;
+    }
+  } catch (error) {
+    console.error(`[${userId}] Erro ao reprocessar sinais:`, error);
+    return false;
+  }
 }
 
 export function updateMediaStatus(audioEnabled, videoEnabled) {
